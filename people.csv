@@ -1,0 +1,20 @@
+people:  92,941
+offices: 5,987
+terms:   157,333
+city/muni offices linked to a province's Governor seat: 5,554 of 5,647
+unmatched (no Governor office found for their province): 93
+['NCR FIRST DISTRICT', 'NCR FOURTH DISTRICT', 'NCR SECOND DISTRICT', 'NCR THIRD DISTRICT', 'SPECIAL GEOGRAPHIC AREA']
+
+rows per position in source file:
+Position
+COUNCILOR                           118203
+VICE MAYOR                           14419
+MAYOR                                14398
+PROVINCIAL BOARD MEMBER               6737
+MEMBER, HOUSE OF REPRESENTATIVES      2108
+VICE GOVERNOR                          714
+GOVERNOR                               702
+SENATOR                                 48
+PRESIDENT                                2
+VICE PRESIDENT                           2
+Name: count, dtype: int64
