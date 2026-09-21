@@ -30,6 +30,12 @@
      slots 1 and 2) for telling person A from person B on the Compare chart. */
   --compare-a:#2a78d6;
   --compare-b:#eb6834;
+  /* the other deliberate spot of non-grayscale color: a small, sparing red
+     "pop" (text/icon-safe, checked at 4.5:1) for the one or two places that
+     benefit from standing out -- which page you're on, which view is active
+     -- never a fill, never the default state of anything. */
+  --pop-red:#c9302c;
+  --pop-red-soft:rgba(201,48,44,0.12);
   --font-ui:"Public Sans","Segoe UI",system-ui,-apple-system,sans-serif;
   --font-mono:"JetBrains Mono","SF Mono",Consolas,monospace;
 }
@@ -53,6 +59,8 @@
     --shadow:0 1px 2px rgba(0,0,0,0.3),0 8px 24px rgba(0,0,0,0.4);
     --compare-a:#3987e5;
     --compare-b:#d95926;
+    --pop-red:#e56060;
+    --pop-red-soft:rgba(229,96,96,0.16);
   }
 }
 :root[data-theme="dark"]{
@@ -74,6 +82,8 @@
   --shadow:0 1px 2px rgba(0,0,0,0.3),0 8px 24px rgba(0,0,0,0.4);
   --compare-a:#3987e5;
   --compare-b:#d95926;
+  --pop-red:#e56060;
+  --pop-red-soft:rgba(229,96,96,0.16);
 }
 
 /* ---------------------------------------------------------------- base */
@@ -106,12 +116,6 @@ button{font-family:inherit;}
   z-index:1200;
 }
 .brand{ display:flex; align-items:center; gap:10px; text-decoration:none; flex:0 0 auto; }
-.brand-mark{
-  width:32px; height:32px; border-radius:8px; flex:0 0 auto;
-  background:var(--text-primary);
-  color:var(--surface-card); display:flex; align-items:center; justify-content:center;
-  font-weight:700; font-size:15px;
-}
 .brand-name{ font-weight:700; font-size:15px; color:var(--text-primary); letter-spacing:-.01em; }
 
 .search-wrap{ position:relative; flex:1 1 320px; min-width:0; max-width:520px; }
@@ -149,8 +153,12 @@ button{font-family:inherit;}
   padding:8px 12px; border-radius:8px;
 }
 .topnav a:hover{ background:var(--surface-raised); color:var(--text-primary); }
-.topnav a.active{ background:var(--accent-soft); color:var(--accent); }
-@media (max-width:860px){ .topnav a span.nav-label{ display:none; } .topnav a{ padding:8px 10px; } }
+.topnav a.active{ background:var(--pop-red-soft); color:var(--pop-red); }
+/* The nav is only three short words (Map/Browse/Compare) since Home moved
+   its own content out from behind these links, so there's no need to hide
+   the label down to icon-only -- there's no icon to fall back to, and a
+   label-less colored pill isn't a usable nav. Just tighten the padding. */
+@media (max-width:860px){ .topnav a{ padding:8px 10px; } }
 @media (max-width:560px){
   .topbar{ flex-wrap:wrap; row-gap:8px; }
   .search-wrap{ order:3; flex-basis:100%; max-width:none; }
@@ -234,6 +242,19 @@ footer.methodology b{ color:var(--text-secondary); }
 .quick-links a{ font-size:12.5px; font-weight:700; color:var(--text-secondary); text-decoration:none; border-bottom:1px solid var(--border-strong); padding-bottom:2px; }
 .quick-links a:hover{ color:var(--text-primary); border-color:var(--accent-strong); }
 
+/* Home's three main entry points, big enough to be the obvious way in now
+   that the hierarchy has moved to the Map page. */
+.entry-cards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin:20px 2px 8px; }
+.entry-card{
+  display:flex; flex-direction:column; gap:6px; background:var(--surface-card);
+  border:1px solid var(--border); border-radius:14px; padding:20px; text-decoration:none;
+  color:inherit;
+}
+.entry-card:hover{ border-color:var(--pop-red); box-shadow:var(--shadow); }
+.entry-card-title{ font-size:16px; font-weight:700; letter-spacing:-.01em; }
+.entry-card-desc{ font-size:12.5px; color:var(--text-secondary); line-height:1.5; }
+.entry-card-go{ font-size:12px; font-weight:700; color:var(--pop-red); margin-top:4px; }
+
 .tree-lede{ font-size:12.5px; color:var(--text-secondary); line-height:1.6; max-width:64ch; margin:0 0 14px; }
 
 .tree-head{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; justify-content:space-between; margin-bottom:10px; }
@@ -241,11 +262,13 @@ footer.methodology b{ color:var(--text-secondary); }
 .tree-head .tree-lede{ margin-bottom:0; }
 
 /* The government hierarchy DIAGRAM: a pannable, zoomable node-and-connector
-   canvas, the premium "see the actual shape of it" view. One hue (blue),
-   three monotone-lightness steps by depth (region, brightest -> city,
+   canvas, the premium "see the actual shape of it" view, shared by both the
+   region->province->city tree and the branch->party tree. One hue (red, the
+   app's one sanctioned accent besides the map's own scale), three
+   monotone-lightness steps by depth (top tier brightest -> bottom tier
    deepest), validated as an ordinal ramp against both this app's light and
    dark surfaces; leaf officials stay neutral, since there can be dozens of
-   them per city and color there would be noise, not identity. */
+   them per city or party and color there would be noise, not identity. */
 .diagram-toolbar{ display:flex; gap:8px; flex-wrap:wrap; }
 .diagram-toolbar button{
   font-family:var(--font-ui); font-size:12px; font-weight:700; color:var(--text-secondary);
@@ -282,17 +305,34 @@ footer.methodology b{ color:var(--text-secondary); }
   background:var(--surface-raised); cursor:default; width:260px; padding:14px 16px;
   align-items:flex-start; flex-direction:column; gap:2px;
 }
-.diagram-node-region, .diagram-node-province, .diagram-node-city{
+.diagram-node-region, .diagram-node-province, .diagram-node-city,
+.diagram-node-branch, .diagram-node-party{
   border-left:3px solid var(--diagram-accent, var(--border-strong));
 }
-.diagram-node-region{ box-shadow:0 0 0 1px color-mix(in srgb, var(--diagram-accent) 25%, transparent), var(--shadow); }
+.diagram-node-region, .diagram-node-branch{ box-shadow:0 0 0 1px color-mix(in srgb, var(--diagram-accent) 25%, transparent), var(--shadow); }
 .diagram-node-official{ cursor:default; border-style:dashed; box-shadow:none; background:var(--surface-page); }
+.diagram-node-pager{
+  cursor:default; box-shadow:none; background:var(--surface-page);
+  flex-direction:column; align-items:stretch; gap:6px; padding:10px 12px;
+}
+.diagram-pager{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.diagram-pager-btn{
+  width:26px; height:22px; flex:0 0 auto; border-radius:6px; border:1px solid var(--border);
+  background:var(--surface-card); color:var(--text-secondary); cursor:pointer; font-size:9px; line-height:1;
+}
+.diagram-pager-btn:hover:not(:disabled){ color:var(--text-primary); border-color:var(--accent-strong); }
+.diagram-pager-btn:disabled{ opacity:.35; cursor:default; }
+.diagram-pager-count{ font-size:10.5px; font-weight:700; color:var(--text-secondary); font-family:var(--font-mono); text-align:center; }
+.diagram-pager-browse{ font-size:10px; font-weight:700; color:var(--pop-red); text-decoration:none; text-align:center; }
+.diagram-pager-browse:hover{ text-decoration:underline; }
 .diagram-caret{
   flex:0 0 auto; width:16px; height:16px; display:flex; align-items:center; justify-content:center;
   color:var(--text-muted); transition:transform .12s ease;
 }
-.diagram-caret::before{ content:"\25B8"; font-size:12px; }
-.diagram-node.is-open > .diagram-caret{ transform:rotate(90deg); }
+/* points down by default: that's where expanding this card will put its
+   children now that the tree grows downward, not to the right. */
+.diagram-caret::before{ content:"\25BE"; font-size:12px; }
+.diagram-node.is-open > .diagram-caret{ transform:rotate(180deg); }
 .diagram-node-body{ min-width:0; flex:1 1 auto; }
 .diagram-node-title{ font-weight:700; font-size:12.5px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .diagram-node-title a{ color:var(--text-primary); text-decoration:none; }
@@ -355,6 +395,16 @@ a.tree-name:hover{ text-decoration:underline; }
   color:var(--text-muted); width:74px; white-space:nowrap;
 }
 .tree-empty{ color:var(--text-muted); font-style:normal; padding-left:10px; }
+.tree-pager-row{ display:flex; align-items:center; gap:10px; padding:6px 10px 6px 30px; flex-wrap:wrap; }
+.tree-pager-btn{
+  width:24px; height:22px; flex:0 0 auto; border-radius:6px; border:1px solid var(--border);
+  background:var(--surface-card); color:var(--text-secondary); cursor:pointer; font-size:9px; line-height:1;
+}
+.tree-pager-btn:hover:not(:disabled){ color:var(--text-primary); border-color:var(--accent-strong); }
+.tree-pager-btn:disabled{ opacity:.35; cursor:default; }
+.tree-pager-label{ font-family:var(--font-mono); font-size:11.5px; font-weight:600; color:var(--text-secondary); }
+.tree-pager-browse{ margin-left:auto; font-size:11.5px; font-weight:700; color:var(--pop-red); text-decoration:none; }
+.tree-pager-browse:hover{ text-decoration:underline; }
 @media (max-width: 640px){
   .tree-node > .tree-children{ padding-left:12px; margin-left:6px; }
   .tree-row{ flex-wrap:wrap; row-gap:2px; }
@@ -399,6 +449,27 @@ a.party-node:hover{ border-color:var(--accent-strong); }
 .party-node-meta{ display:block; font-size:10px; color:var(--text-muted); font-weight:600; margin-top:3px; }
 
 /* ---------------------------------------------------------------- map page */
+/* The Map page now holds three views (the choropleth, and the two
+   hierarchy trees moved here from the old home page) behind one switcher,
+   so "which government structure am I looking at" is one decision, made
+   once, rather than three separate pages. */
+.map-view-root{ display:flex; flex-direction:column; height:100%; min-height:0; }
+.view-switch{
+  flex:0 0 auto; display:flex; gap:8px; flex-wrap:wrap;
+  padding:12px 20px; background:var(--surface-card); border-bottom:1px solid var(--border);
+}
+.view-switch button{
+  font-family:var(--font-ui); font-size:12.5px; font-weight:700; color:var(--text-secondary);
+  background:var(--surface-raised); border:1px solid var(--border); border-radius:8px;
+  padding:7px 14px; cursor:pointer;
+}
+.view-switch button:hover{ color:var(--text-primary); border-color:var(--accent-strong); }
+.view-switch button.active{ background:var(--pop-red-soft); color:var(--pop-red); border-color:var(--pop-red); }
+.map-view-panel{ flex:1 1 auto; min-height:0; }
+.map-view-panel[hidden]{ display:none; }
+#panel-map{ overflow:hidden; }
+.map-view-panel.hierarchy-panel{ overflow-y:auto; padding:22px 24px 48px; }
+
 .map-shell{ display:flex; height:100%; width:100%; }
 .map-col{ flex:1 1 auto; position:relative; min-width:0; min-height:0; background:var(--surface-page); }
 #map{ position:absolute; inset:0; background:var(--surface-page); }
@@ -432,7 +503,7 @@ a.party-node:hover{ border-color:var(--accent-strong); }
 .legend-title{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:8px; }
 .legend-bar{
   height:10px; border-radius:5px;
-  background:linear-gradient(to right, #440154, #3e4a89, #26828e, #1f9e89, #6ece58, #fde725);
+  background:linear-gradient(to right, #000003, #4a0b6a, #a42c60, #ed6825, #f7d13c, #fcfea4);
   margin-bottom:5px;
 }
 .legend-scale{ display:flex; justify-content:space-between; font-size:11px; font-weight:600; color:var(--text-secondary); }
