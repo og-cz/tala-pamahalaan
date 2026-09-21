@@ -131,6 +131,20 @@
   };
   var REGION_ORDER = Object.keys(REGION_PROVINCES);
 
+  // A second, independent hierarchy over the same 19,647 officials: branch
+  // (executive/legislative, a real field on every row) then party (also a
+  // real field, just often blank), instead of geography. Answers "who's in
+  // this party" the same structural way the map answers "who governs this
+  // province" -- a tree you open, not a sentence you have to already know
+  // to search for.
+  var BRANCH_LABELS = { executive: "Executive branch", legislative: "Legislative branch" };
+  var BRANCH_ORDER = ["executive", "legislative"];
+  var NO_PARTY_KEY = "__NONE__"; // sentinel for "party is blank on this record", shared with Browse's filter
+  var PARTY_LEAF_CAP = 30; // officials shown per party node before paging
+  var PARTY_BRANCH_CAP = 15; // parties shown directly under a branch before paging (there are 91-109 distinct parties per branch)
+  var CITY_PAGE_CAP = 15; // cities shown directly under a province before paging (Cebu alone has 57)
+  var COUNCILOR_PAGE_CAP = 12; // councilors shown under a city before paging (Mayor/Vice Mayor always shown; 39 cities have more than 15 councilors on record)
+
   var governorByProvince = null; // { PROVINCE: officialRow }, built once the data is in
   function buildGovernorIndex() {
     governorByProvince = {};
@@ -148,13 +162,6 @@
   }
   function govEmptyRowHtml(text) {
     return '<li class="tree-node tree-leaf"><div class="tree-row tree-row-leaf tree-empty">' + esc(text) + "</div></li>";
-  }
-  function buildCityChildrenHtml(cityRow) {
-    if (!cityRow || !cityRow.full_name) return govEmptyRowHtml("No officials on record for this city.");
-    var html = govLeafRowHtml("Mayor", cityRow);
-    if (cityRow.vice_mayor) html += govLeafRowHtml("Vice Mayor", cityRow.vice_mayor);
-    (cityRow.councilors || []).forEach(function (c) { html += govLeafRowHtml("Councilor", c); });
-    return html;
   }
   function govCityRowHtml(provinceKey, cityRow) {
     var mayorBit = cityRow.full_name
@@ -205,26 +212,151 @@
       '<ul class="tree-children">' + REGION_ORDER.map(govRegionRowHtml).join("") + "</ul>" +
     "</li></ul>";
   }
+  // ---- branch/party list rows (same shape as the region/province rows
+  // above, grouped by o.branch then o.party instead of by geography) ----
+  function officialsByBranch(branchKey) {
+    return allOfficials.filter(function (o) { return o.branch === branchKey; });
+  }
+  function partyGroupsForBranch(branchKey) {
+    var byParty = {};
+    officialsByBranch(branchKey).forEach(function (o) {
+      var key = o.party || NO_PARTY_KEY;
+      (byParty[key] = byParty[key] || []).push(o);
+    });
+    return Object.keys(byParty).sort(function (a, b) { return byParty[b].length - byParty[a].length; })
+      .map(function (key) { return { key: key, officials: byParty[key] }; });
+  }
+  function officialsForParty(branchKey, partyKey) {
+    return officialsByBranch(branchKey).filter(function (o) { return (o.party || NO_PARTY_KEY) === partyKey; })
+      .slice().sort(function (a, b) { return b.cumulative_years - a.cumulative_years; });
+  }
+  function govBranchRowHtml(branchKey) {
+    var count = officialsByBranch(branchKey).length;
+    return '<li class="tree-node" data-kind="branch" data-branch="' + esc(branchKey) + '">' +
+      '<div class="tree-row" data-toggle tabindex="0" role="button">' +
+        '<span class="tree-caret" aria-hidden="true"></span>' +
+        '<span class="tree-name">' + esc(BRANCH_LABELS[branchKey]) + "</span>" +
+        '<span class="tree-meta">' + count.toLocaleString() + " officials</span>" +
+      "</div>" +
+      '<ul class="tree-children" hidden></ul>' +
+    "</li>";
+  }
+  function govPartyRowHtml(branchKey, partyKey, count) {
+    var label = partyKey === NO_PARTY_KEY ? "No party on record" : partyKey;
+    return '<li class="tree-node" data-kind="party" data-branch="' + esc(branchKey) + '" data-party="' + esc(partyKey) + '">' +
+      '<div class="tree-row" data-toggle tabindex="0" role="button">' +
+        '<span class="tree-caret" aria-hidden="true"></span>' +
+        '<span class="tree-name">' + esc(label) + "</span>" +
+        '<span class="tree-meta">' + count.toLocaleString() + (count === 1 ? " official" : " officials") + "</span>" +
+      "</div>" +
+      '<ul class="tree-children" hidden></ul>' +
+    "</li>";
+  }
+  // An in-place pager (up/down, "X-Y of Z"), not a link that leaves the
+  // page: some parties run into the hundreds of officials, so "see
+  // everything" means paging through it right here. A small "view in
+  // Browse" link stays as an escape hatch for whoever prefers the table.
+  // Page position is keyed by branch/party and shared with the diagram, so
+  // switching views mid-browse doesn't reset your place (see
+  // hierarchyPageState, defined with the diagram engine below).
+  // browseFilter is a subset of {branch, party, province} -- whatever the
+  // paged list was grouped by -- so the escape-hatch link can jump to
+  // Browse pre-filtered to the same slice, however it was reached.
+  function govPagerHtml(key, page, total, pageSize, browseFilter) {
+    var totalPages = Math.ceil(total / pageSize);
+    if (totalPages <= 1) return "";
+    browseFilter = browseFilter || {};
+    var from = page * pageSize + 1, to = Math.min(total, (page + 1) * pageSize);
+    return '<li class="tree-node tree-leaf tree-pager" data-pager-key="' + esc(key) + '">' +
+      '<div class="tree-pager-row">' +
+        '<button type="button" class="tree-pager-btn" data-pager-dir="up"' + (page <= 0 ? " disabled" : "") + ' aria-label="Previous page">&#9650;</button>' +
+        '<span class="tree-pager-label">' + from + "–" + to + " of " + total.toLocaleString() + "</span>" +
+        '<button type="button" class="tree-pager-btn" data-pager-dir="down"' + (page >= totalPages - 1 ? " disabled" : "") + ' aria-label="Next page">&#9660;</button>' +
+        '<a class="tree-pager-browse" href="#/browse" data-browse-branch="' + esc(browseFilter.branch || "") + '" data-browse-party="' + esc(browseFilter.party || "") + '" ' +
+        'data-browse-province="' + esc(browseFilter.province || "") + '">View in Browse ↗</a>' +
+      "</div></li>";
+  }
+  // dispatches a paged-list key ("branch:<b>", "party:<b>:<p>",
+  // "province:<p>", "city:<p>:<c>") back to the function that rendered it,
+  // so a single pager click handler can re-render any of the four without
+  // needing to know which one it's looking at ahead of time.
+  function rerenderPagedList(key) {
+    var i = key.indexOf(":");
+    var kind = key.slice(0, i), rest = key.slice(i + 1);
+    if (kind === "branch") return renderPartyGroupPage(rest);
+    if (kind === "province") return renderProvinceCitiesPage(rest);
+    if (kind === "party" || kind === "city") {
+      var j = rest.indexOf(":");
+      var a = rest.slice(0, j), b = rest.slice(j + 1);
+      return kind === "party" ? renderPartyOfficialsPage(a, b) : renderCityOfficialsPage(a, b);
+    }
+    return "";
+  }
+  function renderPartyGroupPage(branchKey) {
+    var key = "branch:" + branchKey;
+    var groups = partyGroupsForBranch(branchKey);
+    var page = pageFor(key);
+    var pageGroups = groups.slice(page * PARTY_BRANCH_CAP, (page + 1) * PARTY_BRANCH_CAP);
+    var html = pageGroups.map(function (g) { return govPartyRowHtml(branchKey, g.key, g.officials.length); }).join("");
+    return (html || govEmptyRowHtml("No officials on record for this branch.")) +
+      govPagerHtml(key, page, groups.length, PARTY_BRANCH_CAP, { branch: branchKey });
+  }
+  function renderPartyOfficialsPage(branchKey, partyKey) {
+    var key = "party:" + branchKey + ":" + partyKey;
+    var officials = officialsForParty(branchKey, partyKey);
+    var page = pageFor(key);
+    var pageOfficials = officials.slice(page * PARTY_LEAF_CAP, (page + 1) * PARTY_LEAF_CAP);
+    var html = pageOfficials.map(function (o) { return govLeafRowHtml(o.position, o); }).join("");
+    return (html || govEmptyRowHtml("No officials on record for this party.")) +
+      govPagerHtml(key, page, officials.length, PARTY_LEAF_CAP, { branch: branchKey, party: partyKey });
+  }
+  function citiesForProvince(provinceKey) {
+    return (citiesByProvinceNorm[provinceKey] || []).filter(function (c) { return c.city; }).slice()
+      .sort(function (a, b) { return (a.city || "").localeCompare(b.city || ""); });
+  }
+  function renderProvinceCitiesPage(provinceKey) {
+    var key = "province:" + provinceKey;
+    var cities = citiesForProvince(provinceKey);
+    var page = pageFor(key);
+    var pageCities = cities.slice(page * CITY_PAGE_CAP, (page + 1) * CITY_PAGE_CAP);
+    var html = pageCities.map(function (c) { return govCityRowHtml(provinceKey, c); }).join("");
+    return (html || govEmptyRowHtml("No cities on record for this province.")) +
+      govPagerHtml(key, page, cities.length, CITY_PAGE_CAP, { province: provinceKey });
+  }
+  function renderCityOfficialsPage(provinceKey, cityName) {
+    var row = citiesForProvince(provinceKey).find(function (c) { return c.city === cityName; });
+    if (!row || !row.full_name) return govEmptyRowHtml("No officials on record for this city.");
+    var key = "city:" + provinceKey + ":" + cityName;
+    var councilors = row.councilors || [];
+    var page = pageFor(key);
+    var pageCouncilors = councilors.slice(page * COUNCILOR_PAGE_CAP, (page + 1) * COUNCILOR_PAGE_CAP);
+    var html = govLeafRowHtml("Mayor", row);
+    if (row.vice_mayor) html += govLeafRowHtml("Vice Mayor", row.vice_mayor);
+    html += pageCouncilors.map(function (c) { return govLeafRowHtml("Councilor", c); }).join("");
+    return html + govPagerHtml(key, page, councilors.length, COUNCILOR_PAGE_CAP, { province: provinceKey });
+  }
+  function partyTreeHtmlRoot() {
+    return '<ul class="tree-root"><li class="tree-node tree-node-root">' +
+      '<div class="tree-row tree-row-root">' +
+        '<span class="tree-name">Officials by branch and party</span>' +
+        '<span class="tree-meta">' + nationalStats.totalOfficials.toLocaleString() + " officials &middot; " + BRANCH_ORDER.length + " branches</span>" +
+      "</div>" +
+      '<ul class="tree-children">' + BRANCH_ORDER.map(govBranchRowHtml).join("") + "</ul>" +
+    "</li></ul>";
+  }
   function toggleGovNode(li, childUl) {
     var kind = li.getAttribute("data-kind");
     if (childUl.getAttribute("data-built") !== "1") {
       if (kind === "region") {
         childUl.innerHTML = REGION_PROVINCES[li.getAttribute("data-region")].map(govProvinceRowHtml).join("");
       } else if (kind === "province") {
-        var provinceKey = li.getAttribute("data-province");
-        // a handful of Mayor records have no city name on record at all (see
-        // the README's "known rough edges"); skip those here the same way
-        // the map's own city list already does, rather than show a blank row.
-        var cities = (citiesByProvinceNorm[provinceKey] || []).filter(function (c) { return c.city; }).slice()
-          .sort(function (a, b) { return (a.city || "").localeCompare(b.city || ""); });
-        childUl.innerHTML = cities.length
-          ? cities.map(function (c) { return govCityRowHtml(provinceKey, c); }).join("")
-          : govEmptyRowHtml("No cities on record for this province.");
+        childUl.innerHTML = renderProvinceCitiesPage(li.getAttribute("data-province"));
       } else if (kind === "city") {
-        var pKey = li.getAttribute("data-province");
-        var cName = li.getAttribute("data-city");
-        var row = (citiesByProvinceNorm[pKey] || []).find(function (c) { return c.city === cName; });
-        childUl.innerHTML = buildCityChildrenHtml(row);
+        childUl.innerHTML = renderCityOfficialsPage(li.getAttribute("data-province"), li.getAttribute("data-city"));
+      } else if (kind === "branch") {
+        childUl.innerHTML = renderPartyGroupPage(li.getAttribute("data-branch"));
+      } else if (kind === "party") {
+        childUl.innerHTML = renderPartyOfficialsPage(li.getAttribute("data-branch"), li.getAttribute("data-party"));
       }
       childUl.setAttribute("data-built", "1");
     }
@@ -248,6 +380,25 @@
       e.preventDefault();
       handle(e);
     });
+    // the pager row: up/down page in place, or the "View in Browse" link
+    // jumps out pre-filtered to whatever slice it was paging.
+    container.addEventListener("click", function (e) {
+      var btn = e.target.closest(".tree-pager-btn");
+      if (btn) {
+        var pagerLi = btn.closest(".tree-pager");
+        var key = pagerLi.getAttribute("data-pager-key");
+        setPage(key, pageFor(key) + (btn.getAttribute("data-pager-dir") === "up" ? -1 : 1));
+        pagerLi.parentElement.innerHTML = rerenderPagedList(key);
+        return;
+      }
+      var browseLink = e.target.closest(".tree-pager-browse");
+      if (!browseLink) return;
+      applyBrowseHierarchyFilter({
+        branch: browseLink.getAttribute("data-browse-branch"),
+        party: browseLink.getAttribute("data-browse-party"),
+        province: browseLink.getAttribute("data-browse-province"),
+      });
+    });
   }
 
   // ------------------------------------------------------------------ government hierarchy DIAGRAM
@@ -257,15 +408,24 @@
   // text rows. Deliberately a separate small data model (plain JS objects
   // with lazily-built .children) instead of reusing the list's HTML-string
   // builders, since a diagram needs real x/y coordinates to lay out and draw
-  // connectors from, not markup.
-  var DIAG_COL_W = 272;   // horizontal gap between one depth level and the next
-  var DIAG_NODE_W = 232;  // fixed card width, must match the CSS .diagram-node width exactly
-  var DIAG_ROW_H = 50;    // vertical slot per leaf-equivalent row
-  // one hue, three monotone-lightness steps (validated with the dataviz
-  // skill's ordinal-ramp check against both this app's light and dark
-  // surfaces), used only here: a deliberate, separate accent from the
-  // grayscale chrome everywhere else, not a return to a branded palette.
-  var DIAG_LEVEL_COLOR = { region: "#6da7ec", province: "#2a78d6", city: "#184f95" };
+  // connectors from, not markup. Grows downward (depth = row, siblings
+  // spread left-right within a row), the familiar org-chart shape, rather
+  // than left-to-right.
+  var DIAG_LEVEL_H = 150;    // vertical gap between one depth level (row) and the next
+  var DIAG_NODE_W = 232;     // fixed card width, must match the CSS .diagram-node width exactly
+  var DIAG_NODE_ANCHOR_H = 64; // assumed card height, used only to anchor connector curves
+  var DIAG_SIBLING_W = 260;  // horizontal slot per leaf-equivalent column
+  // one hue (red), three monotone-lightness steps, validated with the
+  // dataviz skill's ordinal-ramp check against every surface this app draws
+  // a diagram node on (light: card #ffffff 3.01:1, sunken #ececec 2.55:1;
+  // dark: card #1c1c1c 2.29:1, sunken #0a0a0a 2.65:1, all >= the 2:1 ordinal
+  // floor). Used only here and shared by both hierarchy diagrams (geography
+  // and branch/party) so "top tier" and "bottom tier" read the same way in
+  // either one; leaf officials stay neutral in both.
+  var DIAG_LEVEL_COLOR = {
+    region: "#ec6d6d", province: "#d62a2a", city: "#a71b1b",
+    branch: "#ec6d6d", party: "#d62a2a",
+  };
 
   function govDiagramRegionNode(regionName) {
     var provinces = REGION_PROVINCES[regionName];
@@ -314,23 +474,105 @@
       expanded: true, childrenLoaded: true, children: REGION_ORDER.map(govDiagramRegionNode),
     };
   }
+  // ---- branch/party diagram nodes (same node shape, grouped by o.branch
+  // and o.party instead of geography; see the list-view versions above) ----
+  function govDiagramBranchNode(branchKey) {
+    return {
+      id: "branch:" + branchKey, kind: "branch", label: BRANCH_LABELS[branchKey],
+      meta: officialsByBranch(branchKey).length.toLocaleString() + " officials",
+      expanded: false, childrenLoaded: false, children: [], branchKey: branchKey,
+    };
+  }
+  function govDiagramPartyNode(branchKey, partyKey, count) {
+    var label = partyKey === NO_PARTY_KEY ? "No party on record" : partyKey;
+    return {
+      id: "party:" + branchKey + ":" + partyKey, kind: "party", label: label,
+      meta: count.toLocaleString() + (count === 1 ? " official" : " officials"),
+      expanded: false, childrenLoaded: false, children: [], branchKey: branchKey, partyKey: partyKey,
+    };
+  }
+  function govDiagramPartyOfficialNode(o) {
+    return {
+      id: "party-official:" + o.person_id + ":" + o.term_start, kind: "official",
+      label: titleCase(o.full_name), roleLabel: o.position,
+      years: fmtYears(o.cumulative_years) + " yrs", personHref: personLink(o.person_id),
+      location: o.office_name,
+      expanded: false, childrenLoaded: true, children: [],
+    };
+  }
+  // A compact in-canvas pager (up/down arrows + "X-Y of Z"), not a link that
+  // leaves the page: there are 90-100+ parties per branch and some parties
+  // run into the hundreds of officials, so "view everything" has to mean
+  // paging through it right here, not a hard cap with an escape hatch.
+  // Page position is shared with the list view via a common key, so
+  // switching views mid-browse doesn't reset your place.
+  var hierarchyPageState = {};
+  function pageFor(key) { return hierarchyPageState[key] || 0; }
+  function setPage(key, page) { hierarchyPageState[key] = Math.max(0, page); }
+  function govDiagramPagerNode(parentId, key, browseFilter, page, total, pageSize) {
+    return {
+      id: "pager:" + key, kind: "pager", parentId: parentId, pagerKey: key,
+      page: page, total: total, pageSize: pageSize,
+      expanded: false, childrenLoaded: true, children: [], browseFilter: browseFilter || {},
+    };
+  }
+  function govDiagramPartyRoot() {
+    return {
+      id: "party-root", kind: "root", label: "Officials by branch and party",
+      meta: nationalStats.totalOfficials.toLocaleString() + " officials &middot; " + BRANCH_ORDER.length + " branches",
+      expanded: true, childrenLoaded: true, children: BRANCH_ORDER.map(govDiagramBranchNode),
+    };
+  }
   function govDiagramLoadChildren(node) {
     if (node.childrenLoaded) return;
     if (node.kind === "region") {
       node.children = REGION_PROVINCES[node.regionName].map(govDiagramProvinceNode);
     } else if (node.kind === "province") {
-      var cities = (citiesByProvinceNorm[node.provinceKey] || []).filter(function (c) { return c.city; }).slice()
-        .sort(function (a, b) { return (a.city || "").localeCompare(b.city || ""); });
-      node.children = cities.map(function (c) { return govDiagramCityNode(node.provinceKey, c); });
+      var pKeyC = "province:" + node.provinceKey;
+      var cities = citiesForProvince(node.provinceKey);
+      var pageC = pageFor(pKeyC);
+      var pageCities = cities.slice(pageC * CITY_PAGE_CAP, (pageC + 1) * CITY_PAGE_CAP);
+      var kidsC = pageCities.map(function (c) { return govDiagramCityNode(node.provinceKey, c); });
+      if (cities.length > CITY_PAGE_CAP) {
+        kidsC.push(govDiagramPagerNode(node.id, pKeyC, { province: node.provinceKey }, pageC, cities.length, CITY_PAGE_CAP));
+      }
+      node.children = kidsC;
     } else if (node.kind === "city") {
-      var row = (citiesByProvinceNorm[node.provinceKey] || []).find(function (c) { return c.city === node.cityName; });
+      var row = citiesForProvince(node.provinceKey).find(function (c) { return c.city === node.cityName; });
       var kids = [];
       if (row && row.full_name) {
         kids.push(govDiagramOfficialNode("Mayor", row));
         if (row.vice_mayor) kids.push(govDiagramOfficialNode("Vice Mayor", row.vice_mayor));
-        (row.councilors || []).forEach(function (c) { kids.push(govDiagramOfficialNode("Councilor", c)); });
+        var pKeyO = "city:" + node.provinceKey + ":" + node.cityName;
+        var councilors = row.councilors || [];
+        var pageO = pageFor(pKeyO);
+        var pageCouncilors = councilors.slice(pageO * COUNCILOR_PAGE_CAP, (pageO + 1) * COUNCILOR_PAGE_CAP);
+        pageCouncilors.forEach(function (c) { kids.push(govDiagramOfficialNode("Councilor", c)); });
+        if (councilors.length > COUNCILOR_PAGE_CAP) {
+          kids.push(govDiagramPagerNode(node.id, pKeyO, { province: node.provinceKey }, pageO, councilors.length, COUNCILOR_PAGE_CAP));
+        }
       }
       node.children = kids;
+    } else if (node.kind === "branch") {
+      var pKey1 = "branch:" + node.branchKey;
+      var groups = partyGroupsForBranch(node.branchKey);
+      var page1 = pageFor(pKey1);
+      var pageGroups = groups.slice(page1 * PARTY_BRANCH_CAP, (page1 + 1) * PARTY_BRANCH_CAP);
+      var kids3 = pageGroups.map(function (g) { return govDiagramPartyNode(node.branchKey, g.key, g.officials.length); });
+      if (groups.length > PARTY_BRANCH_CAP) {
+        kids3.push(govDiagramPagerNode(node.id, pKey1, { branch: node.branchKey }, page1, groups.length, PARTY_BRANCH_CAP));
+      }
+      node.children = kids3;
+    } else if (node.kind === "party") {
+      var pKey2 = "party:" + node.branchKey + ":" + node.partyKey;
+      var officials = officialsForParty(node.branchKey, node.partyKey);
+      var page2 = pageFor(pKey2);
+      var pageOfficials = officials.slice(page2 * PARTY_LEAF_CAP, (page2 + 1) * PARTY_LEAF_CAP);
+      var kids2 = pageOfficials.map(govDiagramPartyOfficialNode);
+      if (officials.length > PARTY_LEAF_CAP) {
+        kids2.push(govDiagramPagerNode(node.id, pKey2, { branch: node.branchKey, party: node.partyKey }, page2, officials.length, PARTY_LEAF_CAP));
+      }
+      node.children = kids2;
     }
     node.childrenLoaded = true;
   }
@@ -344,19 +586,19 @@
   }
   function govDiagramLayout(root) {
     function measure(node, depth) {
-      node.x = depth * DIAG_COL_W;
-      if (!node.expanded || !node.children.length) { node._subH = DIAG_ROW_H; return node._subH; }
-      var h = 0;
-      node.children.forEach(function (c) { h += measure(c, depth + 1); });
-      node._subH = Math.max(h, DIAG_ROW_H);
-      return node._subH;
+      node.y = depth * DIAG_LEVEL_H;
+      if (!node.expanded || !node.children.length) { node._subW = DIAG_SIBLING_W; return node._subW; }
+      var w = 0;
+      node.children.forEach(function (c) { w += measure(c, depth + 1); });
+      node._subW = Math.max(w, DIAG_SIBLING_W);
+      return node._subW;
     }
     measure(root, 0);
-    function place(node, top) {
-      node.y = top + node._subH / 2;
+    function place(node, left) {
+      node.x = left + node._subW / 2;
       if (node.expanded && node.children.length) {
-        var cursor = top;
-        node.children.forEach(function (c) { place(c, cursor); cursor += c._subH; });
+        var cursor = left;
+        node.children.forEach(function (c) { place(c, cursor); cursor += c._subW; });
       }
     }
     place(root, 0);
@@ -372,22 +614,23 @@
     return { nodes: nodes, edges: edges };
   }
   function govDiagramEdgePath(a, b) {
-    var x1 = a.x + DIAG_NODE_W, y1 = a.y, x2 = b.x, y2 = b.y, midX = (x1 + x2) / 2;
+    var x1 = a.x, y1 = a.y + DIAG_NODE_ANCHOR_H, x2 = b.x, y2 = b.y, midY = (y1 + y2) / 2;
     var color = DIAG_LEVEL_COLOR[b.kind] || "var(--border-strong)";
-    return '<path d="M' + x1 + "," + y1 + " C" + midX + "," + y1 + " " + midX + "," + y2 + " " + x2 + "," + y2 +
+    return '<path d="M' + x1 + "," + y1 + " C" + x1 + "," + midY + " " + x2 + "," + midY + " " + x2 + "," + y2 +
       '" class="diagram-edge" style="stroke:' + color + '" />';
   }
+  var DIAG_TOGGLEABLE = { region: 1, province: 1, city: 1, branch: 1, party: 1 };
   function govDiagramNodeHtml(node) {
-    var toggleable = node.kind === "region" || node.kind === "province" || node.kind === "city";
+    var toggleable = !!DIAG_TOGGLEABLE[node.kind];
     var cls = "diagram-node diagram-node-" + node.kind + (node.expanded ? " is-open" : "");
-    var style = "left:" + node.x + "px;top:" + (node.y - DIAG_ROW_H / 2) + "px;";
+    var style = "left:" + (node.x - DIAG_NODE_W / 2) + "px;top:" + node.y + "px;";
     var accent = DIAG_LEVEL_COLOR[node.kind];
     if (accent) style += "--diagram-accent:" + accent + ";";
     var inner;
-    if (node.kind === "root") {
+    if (node.kind === "root" || node.kind === "region" || node.kind === "branch") {
       inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
         '<div class="diagram-node-meta">' + node.meta + "</div>";
-    } else if (node.kind === "region") {
+    } else if (node.kind === "party") {
       inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
         '<div class="diagram-node-meta">' + esc(node.meta) + "</div>";
     } else if (node.kind === "province" || node.kind === "city") {
@@ -397,10 +640,21 @@
       inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
         '<div class="diagram-node-meta">' + personBit + "</div>" +
         (node.meta ? '<div class="diagram-node-count">' + esc(node.meta) + "</div>" : "");
+    } else if (node.kind === "pager") {
+      var totalPages = Math.ceil(node.total / node.pageSize);
+      var from = node.page * node.pageSize + 1, to = Math.min(node.total, (node.page + 1) * node.pageSize);
+      inner = '<div class="diagram-pager">' +
+          '<button type="button" class="diagram-pager-btn" data-pager-dir="up" data-pager-id="' + esc(node.id) + '"' + (node.page <= 0 ? " disabled" : "") + ' aria-label="Previous page">&#9650;</button>' +
+          '<div class="diagram-pager-count">' + from + "–" + to + " of " + node.total.toLocaleString() + "</div>" +
+          '<button type="button" class="diagram-pager-btn" data-pager-dir="down" data-pager-id="' + esc(node.id) + '"' + (node.page >= totalPages - 1 ? " disabled" : "") + ' aria-label="Next page">&#9660;</button>' +
+        "</div>" +
+        '<a class="diagram-pager-browse" href="#/browse" data-browse-branch="' + esc(node.browseFilter.branch || "") + '" ' +
+        'data-browse-party="' + esc(node.browseFilter.party || "") + '" data-browse-province="' + esc(node.browseFilter.province || "") + '">View all in Browse</a>';
     } else {
       inner = '<div class="diagram-node-role">' + esc(node.roleLabel) + "</div>" +
         '<div class="diagram-node-title"><a href="' + node.personHref + '">' + esc(node.label) + "</a></div>" +
-        '<div class="diagram-node-meta">' + esc(node.years) + "</div>";
+        '<div class="diagram-node-meta">' + esc(node.years) + "</div>" +
+        (node.location ? '<div class="diagram-node-count">' + esc(node.location) + "</div>" : "");
     }
     return '<div class="' + cls + '" style="' + style + '" data-id="' + esc(node.id) + '"' +
       (toggleable ? ' data-toggle tabindex="0" role="button"' : "") + ">" +
@@ -410,10 +664,10 @@
   function renderGovDiagram(root, viewport) {
     govDiagramLayout(root);
     var flat = govDiagramFlatten(root);
-    var maxX = DIAG_NODE_W, maxY = DIAG_ROW_H;
+    var maxX = DIAG_SIBLING_W, maxY = DIAG_LEVEL_H;
     flat.nodes.forEach(function (n) {
-      maxX = Math.max(maxX, n.x + DIAG_NODE_W);
-      maxY = Math.max(maxY, n.y + DIAG_ROW_H / 2);
+      maxX = Math.max(maxX, n.x + DIAG_NODE_W / 2);
+      maxY = Math.max(maxY, n.y + DIAG_NODE_ANCHOR_H + 40);
     });
     var canvas = viewport.querySelector(".diagram-canvas");
     canvas.style.width = (maxX + 40) + "px";
@@ -428,17 +682,40 @@
     var canvas = viewport.querySelector(".diagram-canvas");
     var panX = 24, panY = 24, zoom = 1;
     var MIN_Z = 0.3, MAX_Z = 2;
+    var canvasW = 0, canvasH = 0; // unscaled content size, refreshed on every render
+    var PAN_SLACK = 150; // how far past the content's true edge you can still drag, so it never fully disappears but also never feels boxed-in
+    // Keeps the canvas from being dragged or zoomed away into empty space:
+    // the diagram can only pan within its own content size plus a little
+    // slack, so you can always find your way back without hunting.
+    function clampPan(x, y) {
+      if (!canvasW || !canvasH) return { x: x, y: y };
+      var rect = viewport.getBoundingClientRect();
+      var contentW = canvasW * zoom, contentH = canvasH * zoom;
+      var minX = Math.min(0, rect.width - contentW) - PAN_SLACK, maxXPan = PAN_SLACK;
+      var minY = Math.min(0, rect.height - contentH) - PAN_SLACK, maxYPan = PAN_SLACK;
+      return {
+        x: Math.max(minX, Math.min(maxXPan, x)),
+        y: Math.max(minY, Math.min(maxYPan, y)),
+      };
+    }
     function applyTransform() {
+      var clamped = clampPan(panX, panY);
+      panX = clamped.x; panY = clamped.y;
       canvas.style.transform = "translate(" + panX + "px," + panY + "px) scale(" + zoom + ")";
     }
-    function rerender() { renderGovDiagram(root, viewport); applyTransform(); }
+    function rerender() {
+      renderGovDiagram(root, viewport);
+      canvasW = canvas.offsetWidth; canvasH = canvas.offsetHeight;
+      applyTransform();
+    }
     rerender();
+    resetView(); // center the root horizontally instead of an arbitrary fixed offset
 
     // After expanding a branch, its new children can land off-screen (the
     // whole point of a country-sized tree is that most of it isn't visible
     // at once), which reads as "I clicked and nothing happened." Snap-pan the
-    // toggled node to a fixed, comfortable spot instead, with room to its
-    // right for whatever just opened.
+    // toggled node to a fixed, comfortable spot instead, with room below it
+    // for whatever just opened.
     function animatePanTo(targetPanX, targetPanY) {
       canvas.classList.add("is-animating");
       panX = targetPanX; panY = targetPanY;
@@ -447,8 +724,8 @@
     }
     function panToReveal(node) {
       var rect = viewport.getBoundingClientRect();
-      var targetScreenX = Math.min(90, rect.width * 0.18);
-      var targetScreenY = rect.height * 0.4;
+      var targetScreenY = Math.min(70, rect.height * 0.14);
+      var targetScreenX = rect.width * 0.5;
       animatePanTo(targetScreenX - node.x * zoom, targetScreenY - node.y * zoom);
     }
     function toggleNode(node) {
@@ -491,6 +768,26 @@
     }
     function onClick(e) {
       if (dragged) { dragged = false; e.preventDefault(); return; }
+      var pagerBtn = e.target.closest(".diagram-pager-btn");
+      if (pagerBtn) {
+        var pnode = govDiagramFindById(root, pagerBtn.getAttribute("data-pager-id"));
+        if (pnode) {
+          setPage(pnode.pagerKey, pageFor(pnode.pagerKey) + (pagerBtn.getAttribute("data-pager-dir") === "up" ? -1 : 1));
+          var parent = govDiagramFindById(root, pnode.parentId);
+          if (parent) { parent.childrenLoaded = false; govDiagramLoadChildren(parent); }
+          rerender();
+        }
+        return;
+      }
+      var browseLink = e.target.closest(".diagram-pager-browse");
+      if (browseLink) {
+        applyBrowseHierarchyFilter({
+          branch: browseLink.getAttribute("data-browse-branch"),
+          party: browseLink.getAttribute("data-browse-party"),
+          province: browseLink.getAttribute("data-browse-province"),
+        });
+        return; // let the real <a href> navigate too
+      }
       if (e.target.closest("a")) return;
       var el = e.target.closest(".diagram-node[data-toggle]");
       if (!el) return;
@@ -516,7 +813,20 @@
       zoom = newZoom;
       applyTransform();
     }
-    function resetView() { panX = 24; panY = 24; zoom = 1; applyTransform(); }
+    function resetView() {
+      // canvasW/canvasH (used by clampPan) were measured by the mount-time
+      // rerender() call, which can happen while this panel is still
+      // [hidden] -- display:none, so canvas.offsetWidth/Height come back 0
+      // and clampPan silently stops clamping (its own zero-size guard).
+      // Re-measure here too, since resetView() is exactly the function the
+      // Map page calls once this panel is actually shown for the first time.
+      canvasW = canvas.offsetWidth; canvasH = canvas.offsetHeight;
+      zoom = 1;
+      var rect = viewport.getBoundingClientRect();
+      panX = rect.width / 2 - root.x * zoom;
+      panY = 24;
+      applyTransform();
+    }
 
     viewport.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mousemove", onMouseMove);
@@ -535,9 +845,16 @@
     if (zoomOutBtn) zoomOutBtn.addEventListener("click", function () { zoomBy(1 / 1.25); });
     if (resetBtn) resetBtn.addEventListener("click", resetView);
 
-    return function teardown() {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
+    return {
+      teardown: function () {
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      },
+      // exposed so the Map page can re-center this diagram the first time
+      // its panel actually becomes visible -- while hidden ([hidden] is
+      // display:none), the viewport has no real size yet, so centering
+      // math run at mount time would center against a 0x0 box.
+      resetView: resetView,
     };
   }
 
@@ -724,9 +1041,10 @@
   }
 
   // ================================================================== HOME
-  // No hero banner on purpose: the numbers and the three entry points are the
-  // page. Anything explanatory is one line per stat, or tucked into the
-  // collapsed "About this data" section at the bottom for whoever wants it.
+  // No hero banner on purpose: the numbers and three big entry cards are the
+  // page. The government hierarchy now lives on the Map page (as one of its
+  // three views), so Home's only job is the national headline numbers and a
+  // fast, obvious way into Map, Browse, or Compare.
   function renderHomePage(root) {
     var s = nationalStats;
     root.innerHTML =
@@ -737,23 +1055,23 @@
           statTile(REGION_ORDER.length, "Regions") +
           statTile(s.totalCities.toLocaleString(), "Cities covered") +
         "</div>" +
-        '<nav class="quick-links">' +
-          '<a href="#/map">Map</a><a href="#/browse">Browse</a><a href="#/compare">Compare</a>' +
-        "</nav>" +
-        '<div class="tree-head">' +
-          '<div>' +
-            '<div class="section-title">Government hierarchy</div>' +
-            '<p class="tree-lede">Region, then province, then city. Open a branch to see who currently holds it, all the way down to every sitting Councilor.</p>' +
-          "</div>" +
-          '<div class="diagram-toolbar" id="gov-diagram-toolbar">' +
-            '<button type="button" data-diagram-zoom-out title="Zoom out" aria-label="Zoom out">&minus;</button>' +
-            '<button type="button" data-diagram-reset title="Reset view">Reset</button>' +
-            '<button type="button" data-diagram-zoom-in title="Zoom in" aria-label="Zoom in">+</button>' +
-            '<button type="button" class="view-toggle" id="gov-view-toggle">List view</button>' +
-          "</div>" +
+        '<div class="entry-cards">' +
+          '<a class="entry-card" href="#/map">' +
+            '<div class="entry-card-title">Map</div>' +
+            '<div class="entry-card-desc">The province choropleth, plus the full government hierarchy by region and by party, one switch away.</div>' +
+            '<div class="entry-card-go">Open the map &rarr;</div>' +
+          "</a>" +
+          '<a class="entry-card" href="#/browse">' +
+            '<div class="entry-card-title">Browse</div>' +
+            '<div class="entry-card-desc">Every current official nationwide in one table, filterable by branch, position, province, party, and years in office.</div>' +
+            '<div class="entry-card-go">Browse officials &rarr;</div>' +
+          "</a>" +
+          '<a class="entry-card" href="#/compare">' +
+            '<div class="entry-card-title">Compare</div>' +
+            '<div class="entry-card-desc">Put any two current officials side by side, full career timeline included.</div>' +
+            '<div class="entry-card-go">Compare two &rarr;</div>' +
+          "</a>" +
         "</div>" +
-        '<div class="diagram-viewport" id="gov-diagram" tabindex="0"><div class="diagram-canvas"></div></div>' +
-        '<div class="gov-tree" id="gov-tree" hidden>' + govTreeHtml() + "</div>" +
         '<details class="home-about">' +
           "<summary>About this data</summary>" +
           '<div class="home-about-body">' +
@@ -762,22 +1080,44 @@
             "several seats is visible in one place.</p></div>" +
             "<div><h3>Not tracked yet</h3><p>Party-list seats, appointed Executive positions, and the " +
             "Judiciary aren't in this data. Senator, President, and Vice President have too few rows in " +
-            "the source to be a complete roster, so the hierarchy above stops at the local government " +
-            "level, region down to city, rather than reaching up to a national branch it can't back with " +
-            "real records.</p></div>" +
+            "the source to be a complete roster, so both hierarchies on the Map page stop at what these " +
+            "19,647 current local and legislative records can actually back.</p></div>" +
             "<div><h3>How people are matched</h3><p>By name plus province or city, not a government ID, " +
             "since none exists in this data. Someone who moved between office levels may show up as two " +
             "unlinked entries rather than one.</p></div>" +
           "</div>" +
         "</details>" +
       "</div>";
-    wireGovTree(document.getElementById("gov-tree"));
+  }
+  function statTile(value, label) {
+    return '<div class="stat-tile"><div class="stat-value mono">' + value + '</div><div class="stat-label">' + label + "</div></div>";
+  }
 
-    var diagramViewport = document.getElementById("gov-diagram");
-    var diagramToolbar = document.getElementById("gov-diagram-toolbar");
-    var listEl = document.getElementById("gov-tree");
-    var toggleBtn = document.getElementById("gov-view-toggle");
-    var diagramTeardown = wireGovDiagram(diagramViewport, diagramToolbar, govDiagramRoot());
+  // shared by both hierarchy views on the Map page: the toolbar + diagram +
+  // list markup is identical, only the ids/lede/diagram-root differ.
+  function hierarchyPanelHtml(opts) {
+    return '<div class="tree-head">' +
+        '<div>' +
+          '<div class="section-title">' + esc(opts.title) + "</div>" +
+          '<p class="tree-lede">' + opts.lede + "</p>" +
+        "</div>" +
+        '<div class="diagram-toolbar" id="' + opts.prefix + '-diagram-toolbar">' +
+          '<button type="button" data-diagram-zoom-out title="Zoom out" aria-label="Zoom out">&minus;</button>' +
+          '<button type="button" data-diagram-reset title="Reset view">Reset</button>' +
+          '<button type="button" data-diagram-zoom-in title="Zoom in" aria-label="Zoom in">+</button>' +
+          '<button type="button" class="view-toggle" id="' + opts.prefix + '-view-toggle">List view</button>' +
+        "</div>" +
+      "</div>" +
+      '<div class="diagram-viewport" id="' + opts.prefix + '-diagram" tabindex="0"><div class="diagram-canvas"></div></div>' +
+      '<div class="gov-tree" id="' + opts.prefix + '-tree" hidden>' + opts.treeHtml + "</div>";
+  }
+  function wireHierarchyPanel(prefix, diagramRoot) {
+    wireGovTree(document.getElementById(prefix + "-tree"));
+    var diagramViewport = document.getElementById(prefix + "-diagram");
+    var diagramToolbar = document.getElementById(prefix + "-diagram-toolbar");
+    var listEl = document.getElementById(prefix + "-tree");
+    var toggleBtn = document.getElementById(prefix + "-view-toggle");
+    var diagramHandle = wireGovDiagram(diagramViewport, diagramToolbar, diagramRoot);
     // Panning and zooming a canvas is a desktop-shaped interaction; on a
     // phone-width screen the diagram's first frame is mostly cut-off cards
     // with nothing to explain why, so start on the fully-usable list there
@@ -794,16 +1134,83 @@
       diagramViewport.hidden = !showingList;
       diagramToolbar.hidden = !showingList;
       toggleBtn.textContent = showingList ? "List view" : "Diagram view";
+      // the panel's own [hidden] state doesn't affect the diagram viewport
+      // (list/diagram toggle within the same panel, which is already
+      // visible), but re-centering here too is cheap insurance and covers
+      // the case where the diagram is revealed for the first time this way.
+      if (!diagramViewport.hidden) diagramHandle.resetView();
     });
-    currentTeardown = diagramTeardown;
-  }
-  function statTile(value, label) {
-    return '<div class="stat-tile"><div class="stat-value mono">' + value + '</div><div class="stat-label">' + label + "</div></div>";
+    return diagramHandle;
   }
 
   // ================================================================== MAP
+  // Three views behind one switch: the province choropleth (the original
+  // page), and the two hierarchy trees that used to live on Home. Moving
+  // them here means "explore the map" and "explore the org chart" are the
+  // same page, not two things to remember separately.
+  var MAP_VIEWS = ["map", "geo", "party"];
   function renderMapPage(root) {
     root.innerHTML =
+      '<div class="map-view-root">' +
+        '<div class="view-switch" id="map-view-switch">' +
+          '<button type="button" data-view="map">Map</button>' +
+          '<button type="button" data-view="geo">Region hierarchy</button>' +
+          '<button type="button" data-view="party">Party &amp; branch</button>' +
+        "</div>" +
+        '<div class="map-view-panel" id="panel-map">' + mapShellHtml() + "</div>" +
+        '<div class="map-view-panel hierarchy-panel" id="panel-geo" hidden>' +
+          hierarchyPanelHtml({
+            prefix: "geo", title: "Government hierarchy by region",
+            lede: "Region, then province, then city. Open a branch to see who currently holds it, all the way down to every sitting Councilor.",
+            treeHtml: govTreeHtml(),
+          }) +
+        "</div>" +
+        '<div class="map-view-panel hierarchy-panel" id="panel-party" hidden>' +
+          hierarchyPanelHtml({
+            prefix: "party", title: "Government hierarchy by branch and party",
+            lede: "Executive, then Legislative, then every party with a current officeholder. Open one to see exactly who's in it, from Governors down to Councilors.",
+            treeHtml: partyTreeHtmlRoot(),
+          }) +
+        "</div>" +
+      "</div>";
+
+    var mapTeardown = mountMap(root);
+    var geoHandle = wireHierarchyPanel("geo", govDiagramRoot());
+    var partyHandle = wireHierarchyPanel("party", govDiagramPartyRoot());
+
+    var panels = { map: document.getElementById("panel-map"), geo: document.getElementById("panel-geo"), party: document.getElementById("panel-party") };
+    var switchEl = document.getElementById("map-view-switch");
+    // Both hierarchy panels are mounted (and their diagrams laid out) while
+    // still [hidden] -- display:none, so getBoundingClientRect() on their
+    // viewport is 0x0 at that point and any centering math run then is
+    // garbage. Re-run resetView() the first time each panel is actually
+    // shown, once its viewport has a real size.
+    var revealed = { geo: false, party: false };
+    function setView(view) {
+      MAP_VIEWS.forEach(function (v) { panels[v].hidden = v !== view; });
+      switchEl.querySelectorAll("button").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-view") === view); });
+      // the Leaflet map's internal size cache goes stale while its panel is
+      // display:none; refresh it whenever the Map view becomes visible again.
+      if (view === "map" && window.__talaMap) window.__talaMap.invalidateSize();
+      if ((view === "geo" || view === "party") && !revealed[view]) {
+        revealed[view] = true;
+        (view === "geo" ? geoHandle : partyHandle).resetView();
+      }
+    }
+    switchEl.addEventListener("click", function (e) {
+      var btn = e.target.closest("button[data-view]");
+      if (btn) setView(btn.getAttribute("data-view"));
+    });
+    setView("map");
+
+    currentTeardown = function () {
+      if (mapTeardown) mapTeardown();
+      if (geoHandle) geoHandle.teardown();
+      if (partyHandle) partyHandle.teardown();
+    };
+  }
+  function mapShellHtml() {
+    return (
       '<div class="map-shell">' +
         '<div class="map-col">' +
           '<div id="map"></div>' +
@@ -853,8 +1260,13 @@
             "</details>" +
           "</div>" +
         "</div></aside>" +
-      "</div>";
-
+      "</div>"
+    );
+  }
+  // All the map's interaction logic, split out from its markup (mapShellHtml
+  // above) so renderMapPage can build the DOM for all three views first and
+  // mount each one's behavior after, the same shape as wireHierarchyPanel.
+  function mountMap(root) {
     var byProvince = {};
     var lockedProvince = null;
     var activeTooltipLayer = null;
@@ -872,12 +1284,13 @@
     document.getElementById("legend-min").textContent = fmtYears(domainMin) + " yrs";
     document.getElementById("legend-max").textContent = fmtYears(domainMax) + " yrs";
 
-    // sequential ramp: viridis, relative luminance rises monotonically stop to
-    // stop, checked not eyeballed. Kept independent of the app's own brand
-    // palette on purpose -- a choropleth ramp needs perceptual uniformity,
-    // not brand matching.
-    var ramp = ["#440154", "#482878", "#3e4a89", "#31688e", "#26828e",
-      "#1f9e89", "#35b779", "#6ece58", "#b5de2b", "#fde725"];
+    // sequential ramp: inferno, relative luminance rises monotonically stop
+    // to stop (checked, not eyeballed) -- the same perceptually-uniform
+    // family viridis belongs to, just its black -> red -> orange -> yellow
+    // member instead of the purple -> blue -> green one, so the map's own
+    // scale leans into the app's black-and-red identity too.
+    var ramp = ["#000003", "#1a0b40", "#4a0b6a", "#781c6d", "#a42c60",
+      "#cf4446", "#ed6825", "#fb9b06", "#f7d13c", "#fcfea4"];
     var rampRgb = ramp.map(function (h) {
       h = h.replace("#", "");
       return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
@@ -1112,7 +1525,7 @@
     paintNational();
     refreshRankLists();
 
-    currentTeardown = function () {
+    return function () {
       if (onResize) window.removeEventListener("resize", onResize);
       if (map) { try { map.remove(); } catch (e) { /* noop */ } }
     };
@@ -1120,6 +1533,18 @@
 
   // ================================================================== BROWSE
   var browseState = { branch: "", position: "", province: "", party: "", minYears: "", name: "", sortCol: "cumulative_years", sortDir: "desc" };
+  // Used by both hierarchy trees' "+N more" links: jump to Browse pre-filtered
+  // to exactly the branch/party the list was folded from, rather than a dead
+  // end at the leaf cap.
+  function applyBrowseHierarchyFilter(filter) {
+    filter = filter || {};
+    browseState = {
+      branch: filter.branch || "", position: "", province: filter.province || "",
+      party: filter.party || "", minYears: "", name: "",
+      sortCol: "cumulative_years", sortDir: "desc",
+    };
+    location.hash = "#/browse";
+  }
   function renderBrowsePage(root) {
     var provinces = Array.from(new Set(allOfficials.map(function (o) { return o.province; }).filter(Boolean))).sort();
     var parties = Array.from(new Set(allOfficials.map(function (o) { return o.party; }).filter(Boolean))).sort();
@@ -1132,7 +1557,7 @@
           filterField("filter-branch", "Branch", ['<option value="">All branches</option><option value="executive">Executive</option><option value="legislative">Legislative</option>']) +
           filterField("filter-position", "Position", ['<option value="">All positions</option><option>Governor</option><option>Mayor</option><option>Vice Mayor</option><option>Councilor</option>']) +
           filterField("filter-province", "Province", ['<option value="">All provinces</option>'].concat(provinces.map(function (p) { return '<option value="' + esc(p) + '">' + esc(titleCase(p)) + "</option>"; }))) +
-          filterField("filter-party", "Party", ['<option value="">All parties</option>'].concat(parties.map(function (p) { return '<option value="' + esc(p) + '">' + esc(p) + "</option>"; }))) +
+          filterField("filter-party", "Party", ['<option value="">All parties</option><option value="' + NO_PARTY_KEY + '">No party on record</option>'].concat(parties.map(function (p) { return '<option value="' + esc(p) + '">' + esc(p) + "</option>"; }))) +
           '<div class="filter-field"><label for="filter-minyears">Min. years</label><input type="number" id="filter-minyears" min="0" step="1" placeholder="0"></div>' +
           '<div class="filter-field"><label for="filter-name">Name contains</label><input type="text" id="filter-name" placeholder="Search within results…"></div>' +
           '<button class="filter-clear" id="filter-clear-btn" type="button">Clear filters</button>' +
@@ -1192,7 +1617,8 @@
       if (s.branch && o.branch !== s.branch) return false;
       if (s.position && o.position !== s.position) return false;
       if (s.province && o.province !== s.province) return false;
-      if (s.party && o.party !== s.party) return false;
+      if (s.party === NO_PARTY_KEY) { if (o.party) return false; }
+      else if (s.party && o.party !== s.party) return false;
       if (!isNaN(minY) && o.cumulative_years < minY) return false;
       if (nameQ && o.full_name.toLowerCase().indexOf(nameQ) === -1) return false;
       return true;
