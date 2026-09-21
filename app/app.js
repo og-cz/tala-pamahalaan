@@ -250,6 +250,297 @@
     });
   }
 
+  // ------------------------------------------------------------------ government hierarchy DIAGRAM
+  // A pannable, zoomable node-and-connector view of the same hierarchy the
+  // list above renders, for actually seeing the shape of the structure (how
+  // wide a region is, how big a city council is) rather than reading it as
+  // text rows. Deliberately a separate small data model (plain JS objects
+  // with lazily-built .children) instead of reusing the list's HTML-string
+  // builders, since a diagram needs real x/y coordinates to lay out and draw
+  // connectors from, not markup.
+  var DIAG_COL_W = 272;   // horizontal gap between one depth level and the next
+  var DIAG_NODE_W = 232;  // fixed card width, must match the CSS .diagram-node width exactly
+  var DIAG_ROW_H = 50;    // vertical slot per leaf-equivalent row
+  // one hue, three monotone-lightness steps (validated with the dataviz
+  // skill's ordinal-ramp check against both this app's light and dark
+  // surfaces), used only here: a deliberate, separate accent from the
+  // grayscale chrome everywhere else, not a return to a branded palette.
+  var DIAG_LEVEL_COLOR = { region: "#6da7ec", province: "#2a78d6", city: "#184f95" };
+
+  function govDiagramRegionNode(regionName) {
+    var provinces = REGION_PROVINCES[regionName];
+    return {
+      id: "region:" + regionName, kind: "region", label: regionName,
+      meta: provinces.length + (provinces.length === 1 ? " province" : " provinces"),
+      expanded: false, childrenLoaded: false, children: [], regionName: regionName,
+    };
+  }
+  function govDiagramProvinceNode(provinceKey) {
+    var gov = governorByProvince[provinceKey];
+    var cityCount = (citiesByProvinceNorm[provinceKey] || []).filter(function (c) { return c.city; }).length;
+    return {
+      id: "province:" + provinceKey, kind: "province", label: displayProvinceName(provinceKey),
+      roleLabel: gov ? "Gov." : null,
+      personLabel: gov ? titleCase(gov.full_name) : "No Governor on record",
+      personHref: gov ? personLink(gov.person_id) : null,
+      years: gov ? fmtYears(gov.cumulative_years) + " yrs" : null,
+      meta: cityCount + (cityCount === 1 ? " city" : " cities"),
+      expanded: false, childrenLoaded: false, children: [], provinceKey: provinceKey,
+    };
+  }
+  function govDiagramCityNode(provinceKey, cityRow) {
+    return {
+      id: "city:" + provinceKey + ":" + cityRow.city, kind: "city", label: titleCase(cityRow.city),
+      roleLabel: cityRow.full_name ? "Mayor" : null,
+      personLabel: cityRow.full_name ? titleCase(cityRow.full_name) : "No Mayor on record",
+      personHref: cityRow.full_name ? personLink(cityRow.person_id) : null,
+      years: cityRow.full_name ? fmtYears(cityRow.cumulative_years) + " yrs" : null,
+      meta: null,
+      expanded: false, childrenLoaded: false, children: [], provinceKey: provinceKey, cityName: cityRow.city,
+    };
+  }
+  function govDiagramOfficialNode(roleLabel, official) {
+    return {
+      id: "official:" + official.person_id + ":" + roleLabel, kind: "official",
+      label: titleCase(official.full_name), roleLabel: roleLabel,
+      years: fmtYears(official.cumulative_years) + " yrs", personHref: personLink(official.person_id),
+      expanded: false, childrenLoaded: true, children: [],
+    };
+  }
+  function govDiagramRoot() {
+    return {
+      id: "root", kind: "root", label: "Philippine local government",
+      meta: REGION_ORDER.length + " regions &middot; 88 provinces &middot; " + nationalStats.totalCities.toLocaleString() + " cities",
+      expanded: true, childrenLoaded: true, children: REGION_ORDER.map(govDiagramRegionNode),
+    };
+  }
+  function govDiagramLoadChildren(node) {
+    if (node.childrenLoaded) return;
+    if (node.kind === "region") {
+      node.children = REGION_PROVINCES[node.regionName].map(govDiagramProvinceNode);
+    } else if (node.kind === "province") {
+      var cities = (citiesByProvinceNorm[node.provinceKey] || []).filter(function (c) { return c.city; }).slice()
+        .sort(function (a, b) { return (a.city || "").localeCompare(b.city || ""); });
+      node.children = cities.map(function (c) { return govDiagramCityNode(node.provinceKey, c); });
+    } else if (node.kind === "city") {
+      var row = (citiesByProvinceNorm[node.provinceKey] || []).find(function (c) { return c.city === node.cityName; });
+      var kids = [];
+      if (row && row.full_name) {
+        kids.push(govDiagramOfficialNode("Mayor", row));
+        if (row.vice_mayor) kids.push(govDiagramOfficialNode("Vice Mayor", row.vice_mayor));
+        (row.councilors || []).forEach(function (c) { kids.push(govDiagramOfficialNode("Councilor", c)); });
+      }
+      node.children = kids;
+    }
+    node.childrenLoaded = true;
+  }
+  function govDiagramFindById(node, id) {
+    if (node.id === id) return node;
+    for (var i = 0; i < node.children.length; i++) {
+      var found = govDiagramFindById(node.children[i], id);
+      if (found) return found;
+    }
+    return null;
+  }
+  function govDiagramLayout(root) {
+    function measure(node, depth) {
+      node.x = depth * DIAG_COL_W;
+      if (!node.expanded || !node.children.length) { node._subH = DIAG_ROW_H; return node._subH; }
+      var h = 0;
+      node.children.forEach(function (c) { h += measure(c, depth + 1); });
+      node._subH = Math.max(h, DIAG_ROW_H);
+      return node._subH;
+    }
+    measure(root, 0);
+    function place(node, top) {
+      node.y = top + node._subH / 2;
+      if (node.expanded && node.children.length) {
+        var cursor = top;
+        node.children.forEach(function (c) { place(c, cursor); cursor += c._subH; });
+      }
+    }
+    place(root, 0);
+  }
+  function govDiagramFlatten(root) {
+    var nodes = [], edges = [];
+    function walk(node, parent) {
+      nodes.push(node);
+      if (parent) edges.push([parent, node]);
+      if (node.expanded) node.children.forEach(function (c) { walk(c, node); });
+    }
+    walk(root, null);
+    return { nodes: nodes, edges: edges };
+  }
+  function govDiagramEdgePath(a, b) {
+    var x1 = a.x + DIAG_NODE_W, y1 = a.y, x2 = b.x, y2 = b.y, midX = (x1 + x2) / 2;
+    var color = DIAG_LEVEL_COLOR[b.kind] || "var(--border-strong)";
+    return '<path d="M' + x1 + "," + y1 + " C" + midX + "," + y1 + " " + midX + "," + y2 + " " + x2 + "," + y2 +
+      '" class="diagram-edge" style="stroke:' + color + '" />';
+  }
+  function govDiagramNodeHtml(node) {
+    var toggleable = node.kind === "region" || node.kind === "province" || node.kind === "city";
+    var cls = "diagram-node diagram-node-" + node.kind + (node.expanded ? " is-open" : "");
+    var style = "left:" + node.x + "px;top:" + (node.y - DIAG_ROW_H / 2) + "px;";
+    var accent = DIAG_LEVEL_COLOR[node.kind];
+    if (accent) style += "--diagram-accent:" + accent + ";";
+    var inner;
+    if (node.kind === "root") {
+      inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
+        '<div class="diagram-node-meta">' + node.meta + "</div>";
+    } else if (node.kind === "region") {
+      inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
+        '<div class="diagram-node-meta">' + esc(node.meta) + "</div>";
+    } else if (node.kind === "province" || node.kind === "city") {
+      var personBit = node.personHref
+        ? (node.roleLabel ? esc(node.roleLabel) + " " : "") + '<a href="' + node.personHref + '">' + esc(node.personLabel) + "</a>" + (node.years ? " &middot; " + node.years : "")
+        : '<span class="diagram-node-empty">' + esc(node.personLabel) + "</span>";
+      inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
+        '<div class="diagram-node-meta">' + personBit + "</div>" +
+        (node.meta ? '<div class="diagram-node-count">' + esc(node.meta) + "</div>" : "");
+    } else {
+      inner = '<div class="diagram-node-role">' + esc(node.roleLabel) + "</div>" +
+        '<div class="diagram-node-title"><a href="' + node.personHref + '">' + esc(node.label) + "</a></div>" +
+        '<div class="diagram-node-meta">' + esc(node.years) + "</div>";
+    }
+    return '<div class="' + cls + '" style="' + style + '" data-id="' + esc(node.id) + '"' +
+      (toggleable ? ' data-toggle tabindex="0" role="button"' : "") + ">" +
+      (toggleable ? '<span class="diagram-caret" aria-hidden="true"></span>' : "") +
+      '<div class="diagram-node-body">' + inner + "</div></div>";
+  }
+  function renderGovDiagram(root, viewport) {
+    govDiagramLayout(root);
+    var flat = govDiagramFlatten(root);
+    var maxX = DIAG_NODE_W, maxY = DIAG_ROW_H;
+    flat.nodes.forEach(function (n) {
+      maxX = Math.max(maxX, n.x + DIAG_NODE_W);
+      maxY = Math.max(maxY, n.y + DIAG_ROW_H / 2);
+    });
+    var canvas = viewport.querySelector(".diagram-canvas");
+    canvas.style.width = (maxX + 40) + "px";
+    canvas.style.height = (maxY + 40) + "px";
+    canvas.innerHTML =
+      '<svg class="diagram-edges" width="' + (maxX + 40) + '" height="' + (maxY + 40) + '">' +
+        flat.edges.map(function (e) { return govDiagramEdgePath(e[0], e[1]); }).join("") +
+      "</svg>" +
+      flat.nodes.map(govDiagramNodeHtml).join("");
+  }
+  function wireGovDiagram(viewport, toolbar, root) {
+    var canvas = viewport.querySelector(".diagram-canvas");
+    var panX = 24, panY = 24, zoom = 1;
+    var MIN_Z = 0.3, MAX_Z = 2;
+    function applyTransform() {
+      canvas.style.transform = "translate(" + panX + "px," + panY + "px) scale(" + zoom + ")";
+    }
+    function rerender() { renderGovDiagram(root, viewport); applyTransform(); }
+    rerender();
+
+    // After expanding a branch, its new children can land off-screen (the
+    // whole point of a country-sized tree is that most of it isn't visible
+    // at once), which reads as "I clicked and nothing happened." Snap-pan the
+    // toggled node to a fixed, comfortable spot instead, with room to its
+    // right for whatever just opened.
+    function animatePanTo(targetPanX, targetPanY) {
+      canvas.classList.add("is-animating");
+      panX = targetPanX; panY = targetPanY;
+      applyTransform();
+      window.setTimeout(function () { canvas.classList.remove("is-animating"); }, 280);
+    }
+    function panToReveal(node) {
+      var rect = viewport.getBoundingClientRect();
+      var targetScreenX = Math.min(90, rect.width * 0.18);
+      var targetScreenY = rect.height * 0.4;
+      animatePanTo(targetScreenX - node.x * zoom, targetScreenY - node.y * zoom);
+    }
+    function toggleNode(node) {
+      if (!node.childrenLoaded) govDiagramLoadChildren(node);
+      node.expanded = !node.expanded;
+      rerender();
+      if (node.expanded) panToReveal(node);
+    }
+
+    var dragging = false, dragged = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
+    function pointerDown(x, y) {
+      dragging = true; dragged = false;
+      startX = x; startY = y; startPanX = panX; startPanY = panY;
+      viewport.classList.add("is-dragging");
+    }
+    function pointerMove(x, y) {
+      if (!dragging) return;
+      var dx = x - startX, dy = y - startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragged = true;
+      if (dragged) { panX = startPanX + dx; panY = startPanY + dy; applyTransform(); }
+    }
+    function pointerUp() { dragging = false; viewport.classList.remove("is-dragging"); }
+
+    function onMouseDown(e) { if (e.button === 0) pointerDown(e.clientX, e.clientY); }
+    function onMouseMove(e) { pointerMove(e.clientX, e.clientY); }
+    function onMouseUp() { pointerUp(); }
+    function onTouchStart(e) { if (e.touches.length === 1) pointerDown(e.touches[0].clientX, e.touches[0].clientY); }
+    function onTouchMove(e) { if (e.touches.length === 1) { pointerMove(e.touches[0].clientX, e.touches[0].clientY); if (dragged) e.preventDefault(); } }
+    function onTouchEnd() { pointerUp(); }
+    function onWheel(e) {
+      e.preventDefault();
+      var rect = viewport.getBoundingClientRect();
+      var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      var factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      var newZoom = Math.min(MAX_Z, Math.max(MIN_Z, zoom * factor));
+      panX = mx - (mx - panX) * (newZoom / zoom);
+      panY = my - (my - panY) * (newZoom / zoom);
+      zoom = newZoom;
+      applyTransform();
+    }
+    function onClick(e) {
+      if (dragged) { dragged = false; e.preventDefault(); return; }
+      if (e.target.closest("a")) return;
+      var el = e.target.closest(".diagram-node[data-toggle]");
+      if (!el) return;
+      var node = govDiagramFindById(root, el.getAttribute("data-id"));
+      if (!node) return;
+      toggleNode(node);
+    }
+    function onKeydown(e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var el = e.target.closest(".diagram-node[data-toggle]");
+      if (!el) return;
+      e.preventDefault();
+      var node = govDiagramFindById(root, el.getAttribute("data-id"));
+      if (!node) return;
+      toggleNode(node);
+    }
+    function zoomBy(factor) {
+      var rect = viewport.getBoundingClientRect();
+      var mx = rect.width / 2, my = rect.height / 2;
+      var newZoom = Math.min(MAX_Z, Math.max(MIN_Z, zoom * factor));
+      panX = mx - (mx - panX) * (newZoom / zoom);
+      panY = my - (my - panY) * (newZoom / zoom);
+      zoom = newZoom;
+      applyTransform();
+    }
+    function resetView() { panX = 24; panY = 24; zoom = 1; applyTransform(); }
+
+    viewport.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    viewport.addEventListener("touchstart", onTouchStart, { passive: true });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
+    viewport.addEventListener("touchend", onTouchEnd);
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    viewport.addEventListener("click", onClick);
+    viewport.addEventListener("keydown", onKeydown);
+
+    var zoomInBtn = toolbar.querySelector("[data-diagram-zoom-in]");
+    var zoomOutBtn = toolbar.querySelector("[data-diagram-zoom-out]");
+    var resetBtn = toolbar.querySelector("[data-diagram-reset]");
+    if (zoomInBtn) zoomInBtn.addEventListener("click", function () { zoomBy(1.25); });
+    if (zoomOutBtn) zoomOutBtn.addEventListener("click", function () { zoomBy(1 / 1.25); });
+    if (resetBtn) resetBtn.addEventListener("click", resetView);
+
+    return function teardown() {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }
+
   // ------------------------------------------------------------------ router
   var ROUTE_ORDER = ["home", "map", "browse", "compare"];
   function renderRoute() {
@@ -449,9 +740,20 @@
         '<nav class="quick-links">' +
           '<a href="#/map">Map</a><a href="#/browse">Browse</a><a href="#/compare">Compare</a>' +
         "</nav>" +
-        '<div class="section-title">Government hierarchy</div>' +
-        '<p class="tree-lede">Region, then province, then city. Open a branch to see who currently holds it, all the way down to every sitting Councilor.</p>' +
-        '<div class="gov-tree" id="gov-tree">' + govTreeHtml() + "</div>" +
+        '<div class="tree-head">' +
+          '<div>' +
+            '<div class="section-title">Government hierarchy</div>' +
+            '<p class="tree-lede">Region, then province, then city. Open a branch to see who currently holds it, all the way down to every sitting Councilor.</p>' +
+          "</div>" +
+          '<div class="diagram-toolbar" id="gov-diagram-toolbar">' +
+            '<button type="button" data-diagram-zoom-out title="Zoom out" aria-label="Zoom out">&minus;</button>' +
+            '<button type="button" data-diagram-reset title="Reset view">Reset</button>' +
+            '<button type="button" data-diagram-zoom-in title="Zoom in" aria-label="Zoom in">+</button>' +
+            '<button type="button" class="view-toggle" id="gov-view-toggle">List view</button>' +
+          "</div>" +
+        "</div>" +
+        '<div class="diagram-viewport" id="gov-diagram" tabindex="0"><div class="diagram-canvas"></div></div>' +
+        '<div class="gov-tree" id="gov-tree" hidden>' + govTreeHtml() + "</div>" +
         '<details class="home-about">' +
           "<summary>About this data</summary>" +
           '<div class="home-about-body">' +
@@ -470,6 +772,30 @@
         "</details>" +
       "</div>";
     wireGovTree(document.getElementById("gov-tree"));
+
+    var diagramViewport = document.getElementById("gov-diagram");
+    var diagramToolbar = document.getElementById("gov-diagram-toolbar");
+    var listEl = document.getElementById("gov-tree");
+    var toggleBtn = document.getElementById("gov-view-toggle");
+    var diagramTeardown = wireGovDiagram(diagramViewport, diagramToolbar, govDiagramRoot());
+    // Panning and zooming a canvas is a desktop-shaped interaction; on a
+    // phone-width screen the diagram's first frame is mostly cut-off cards
+    // with nothing to explain why, so start on the fully-usable list there
+    // instead. Diagram view stays one tap away either way.
+    if (window.innerWidth < 720) {
+      listEl.hidden = false;
+      diagramViewport.hidden = true;
+      diagramToolbar.hidden = true;
+      toggleBtn.textContent = "Diagram view";
+    }
+    toggleBtn.addEventListener("click", function () {
+      var showingList = !listEl.hidden;
+      listEl.hidden = showingList;
+      diagramViewport.hidden = !showingList;
+      diagramToolbar.hidden = !showingList;
+      toggleBtn.textContent = showingList ? "List view" : "Diagram view";
+    });
+    currentTeardown = diagramTeardown;
   }
   function statTile(value, label) {
     return '<div class="stat-tile"><div class="stat-value mono">' + value + '</div><div class="stat-label">' + label + "</div></div>";
@@ -954,7 +1280,80 @@
     var oa = allOfficials.find(function (o) { return o.person_id === compareSlotA; });
     var ob = allOfficials.find(function (o) { return o.person_id === compareSlotB; });
     if (!oa || !ob) { out.innerHTML = ""; return; }
-    out.innerHTML = '<div class="compare-grid">' + compareColHtml(oa) + compareColHtml(ob) + "</div>";
+    out.innerHTML = compareTimelineChartHtml(oa, ob) +
+      '<div class="compare-grid">' + compareColHtml(oa) + compareColHtml(ob) + "</div>";
+  }
+  // A real, from-the-actual-data comparison chart: every term each of the two
+  // has held, laid out on one shared calendar-year axis so overlap and gaps
+  // are visible at a glance. Not a vote breakdown, this data has no vote
+  // counts or precinct-level results anywhere (the source file only records
+  // who won each race; see the README's "known rough edges" and "what isn't
+  // here yet"), so this is the honest version of "richer comparison": real
+  // term_start/term_end spans, not invented turnout numbers.
+  var COMPARE_COLOR_A = { light: "#2a78d6", dark: "#3987e5" }; // dataviz reference palette, categorical slot 1
+  var COMPARE_COLOR_B = { light: "#eb6834", dark: "#d95926" }; // categorical slot 2
+  function compareTimelineChartHtml(oa, ob) {
+    var pa = timelines[oa.person_id], pb = timelines[ob.person_id];
+    var termsA = pa ? pa.terms.slice() : [];
+    var termsB = pb ? pb.terms.slice() : [];
+    var allTerms = termsA.concat(termsB);
+    if (!allTerms.length) return "";
+    var today = new Date();
+    function yearFrac(dateStr) {
+      var d = new Date(dateStr + "T00:00:00");
+      return d.getFullYear() + d.getMonth() / 12 + d.getDate() / 365;
+    }
+    var starts = allTerms.map(function (t) { return yearFrac(t.term_start); });
+    var ends = allTerms.map(function (t) { return yearFrac(t.term_end || today.toISOString().slice(0, 10)); });
+    var minYear = Math.floor(Math.min.apply(null, starts));
+    var maxYear = Math.ceil(Math.max(yearFrac(today.toISOString().slice(0, 10)), Math.max.apply(null, ends)));
+    var span = Math.max(maxYear - minYear, 1);
+    var VB_W = 720, PAD_L = 6, PAD_R = 6, ROW_H = 30, ROW_GAP = 14, AXIS_H = 22;
+    var chartW = VB_W - PAD_L - PAD_R;
+    function xFor(yf) { return PAD_L + ((yf - minYear) / span) * chartW; }
+    function barsRow(terms, rowY, colorVarName) {
+      return terms.map(function (t) {
+        var x1 = xFor(yearFrac(t.term_start));
+        var x2 = xFor(yearFrac(t.term_end || today.toISOString().slice(0, 10)));
+        var w = Math.max(x2 - x1, 4);
+        var endYear = t.term_end ? new Date(t.term_end + "T00:00:00").getFullYear() : "present";
+        var titleText = esc(t.office_name) + (t.party ? " (" + esc(t.party) + ")" : "") + ", " +
+          new Date(t.term_start + "T00:00:00").getFullYear() + "–" + endYear;
+        return '<rect x="' + x1.toFixed(1) + '" y="' + rowY + '" width="' + w.toFixed(1) + '" height="16" rx="4" ' +
+          'fill="var(' + colorVarName + ')"><title>' + titleText + "</title></rect>";
+      }).join("");
+    }
+    var rowAY = AXIS_H + 6, rowBY = AXIS_H + 6 + ROW_H + ROW_GAP;
+    var totalH = rowBY + ROW_H;
+    var yearTicks = [];
+    var tickCount = span > 18 ? 4 : span > 8 ? 3 : 2;
+    for (var i = 0; i <= tickCount; i++) {
+      var yr = Math.round(minYear + (span * i) / tickCount);
+      // the two end labels would otherwise get clipped by the viewBox edge
+      // under text-anchor:middle, since their tick sits right at the margin
+      var anchor = i === 0 ? "start" : i === tickCount ? "end" : "middle";
+      yearTicks.push('<text x="' + xFor(yr).toFixed(1) + '" y="' + (AXIS_H - 8) + '" text-anchor="' + anchor + '" class="compare-axis-label">' + yr + "</text>" +
+        '<line x1="' + xFor(yr).toFixed(1) + '" x2="' + xFor(yr).toFixed(1) + '" y1="' + (AXIS_H - 4) + '" y2="' + totalH + '" class="compare-axis-tick" />');
+    }
+    return '<div class="compare-timeline-card">' +
+      '<div class="compare-timeline-head">' +
+        '<div class="section-title" style="margin-bottom:0;">Career timeline, side by side</div>' +
+        '<div class="compare-legend">' +
+          '<span class="compare-legend-item"><span class="compare-legend-swatch" style="background:var(--compare-a)"></span>' + esc(titleCase(oa.full_name)) + "</span>" +
+          '<span class="compare-legend-item"><span class="compare-legend-swatch" style="background:var(--compare-b)"></span>' + esc(titleCase(ob.full_name)) + "</span>" +
+        "</div>" +
+      "</div>" +
+      '<div class="compare-timeline-scroll">' +
+        '<svg class="compare-timeline-svg" viewBox="0 0 ' + VB_W + " " + totalH + '" preserveAspectRatio="xMinYMin meet">' +
+          yearTicks.join("") +
+          barsRow(termsA, rowAY, "--compare-a") +
+          barsRow(termsB, rowBY, "--compare-b") +
+        "</svg>" +
+      "</div>" +
+      '<p class="compare-timeline-note">Each bar is one term on record, hover a bar for the office, party, and years. ' +
+      "This is built from real term start and end dates, not vote counts, this data has no vote totals or " +
+      "precinct-level results for any race.</p>" +
+    "</div>";
   }
   function compareColHtml(o) {
     var person = timelines[o.person_id];
