@@ -23,18 +23,26 @@ expects, nothing else to configure.
 This started as a reskin of a different project (Hugis ng Boto, an election-results map) and has
 since grown past it into a real multi-page app, but it deliberately kept that project's whole visual
 language rather than inventing a new one: the dark, near-black neutral palette, one typeface for
-everything, and color spent only where the data needs it (the map's choropleth scale, the timeline's
-current-term marker), not on branding. Text is kept to the minimum needed to read the data; there's
-no hero banner and no tagline under the wordmark, the numbers and the page structure are meant to
-carry the page. It now has:
+everything. Color is spent in exactly three places, each carrying real information rather than
+decorating chrome: the map's choropleth scale, a single validated blue ramp on the hierarchy diagram
+(lightest for a region, deepest for a city, so depth reads as color without ever touching the
+grayscale UI around it), and a two-color pair on the Compare chart for telling the two people apart.
+Text is kept to the minimum needed to read the data; there's no hero banner and no tagline under the
+wordmark, the numbers and the page structure are meant to carry the page. It now has:
 
-- **A home page** built around one thing: a real government hierarchy tree, region, then province,
-  then city, then whoever currently holds each seat in it, all the way down to every sitting
-  Councilor. Nothing is rendered until it's opened, a region expands to its provinces, a province to
-  its cities, a city to its Mayor, Vice Mayor, and full Council, so the page stays fast with 19,647
-  officials behind it rather than trying to draw them all at once. Metro Manila's four districts sit
-  in the tree exactly like any province, just with "No Governor on record" where a Governor would be,
-  since there genuinely isn't one, not because the district was left out. The national headline
+- **A home page** built around one thing: a real government hierarchy, region, then province, then
+  city, then whoever currently holds each seat in it, all the way down to every sitting Councilor. It
+  opens as an actual node diagram, not a list: cards connected by drawn lines, colored by depth, that
+  you pan by dragging and zoom with the scroll wheel or the on-screen controls, so the shape of a
+  region (how many provinces, how big a city council actually is) is something you can see rather
+  than just read. Opening a branch snap-pans the view to it, since most of a country-sized tree is
+  off-screen at any moment and a click into empty space would otherwise look like nothing happened. A
+  plain indented list (the original version of this) is still one click away as "List view," and is
+  what phones open to by default, since dragging and pinching a canvas is a desktop-shaped way to work
+  a page. Either view is built from the same lazy, click-to-expand data, nothing is drawn until it's
+  opened, so the page stays fast with 19,647 officials behind it. Metro Manila's four districts sit in
+  the hierarchy exactly like any province, just with "No Governor on record" where a Governor would
+  be, since there genuinely isn't one, not because the district was left out. The national headline
   numbers sit above it, and the background on how the data is built and matched is tucked into a
   collapsed "About this data" section below it rather than sitting in front of the numbers.
 - **A global search bar**, in the header on every page, that finds any of the 19,647 currently
@@ -49,7 +57,13 @@ carry the page. It now has:
   a minimum years-in-office, sortable by any column. The map's sidebar only ever shows one province
   at a time; this is the same data with the country in view all at once.
 - **A Compare page**: search for any two officials and see their total years in office, current
-  position, and full term history side by side.
+  position, and full term history side by side, plus a career-timeline chart that lays every term
+  either of them has held on one shared calendar-year axis, so overlap and gaps between the two are
+  visible at a glance, not just listed. This is the honest version of a richer comparison: real
+  `term_start`/`term_end` dates, not vote totals, since this data has no vote counts or precinct-level
+  results for any race at all (see "What isn't here yet" below) and this project doesn't fabricate
+  numbers to fill that gap. See "Known rough edges" below for exactly what that means: the fields for
+  it exist in the data, `vote_share_pct` and `margin_pts`, they're just empty for every single term.
 - **A page for every person and every city**, each with its own address (`#/person/<id>`,
   `#/city/<province>/<city>`) so a specific official or a specific city's government can be linked to
   directly, not only reached by clicking through the map. A person's page shows their full career as
