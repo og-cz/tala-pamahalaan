@@ -25,6 +25,11 @@
   --seq-500:#5c5c5c; --seq-550:#4a4a4a; --seq-600:#383838; --seq-650:#262626;
   --seq-700:#141414;
   --seq-ink:#161616;
+  /* the one deliberate spot of non-grayscale color besides the map and the
+     hierarchy diagram: two categorical slots (dataviz reference palette,
+     slots 1 and 2) for telling person A from person B on the Compare chart. */
+  --compare-a:#2a78d6;
+  --compare-b:#eb6834;
   --font-ui:"Public Sans","Segoe UI",system-ui,-apple-system,sans-serif;
   --font-mono:"JetBrains Mono","SF Mono",Consolas,monospace;
 }
@@ -46,6 +51,8 @@
     --accent-ink:#ffffff;
     --danger:#e08080;
     --shadow:0 1px 2px rgba(0,0,0,0.3),0 8px 24px rgba(0,0,0,0.4);
+    --compare-a:#3987e5;
+    --compare-b:#d95926;
   }
 }
 :root[data-theme="dark"]{
@@ -65,6 +72,8 @@
   --accent-ink:#ffffff;
   --danger:#e08080;
   --shadow:0 1px 2px rgba(0,0,0,0.3),0 8px 24px rgba(0,0,0,0.4);
+  --compare-a:#3987e5;
+  --compare-b:#d95926;
 }
 
 /* ---------------------------------------------------------------- base */
@@ -226,6 +235,80 @@ footer.methodology b{ color:var(--text-secondary); }
 .quick-links a:hover{ color:var(--text-primary); border-color:var(--accent-strong); }
 
 .tree-lede{ font-size:12.5px; color:var(--text-secondary); line-height:1.6; max-width:64ch; margin:0 0 14px; }
+
+.tree-head{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; justify-content:space-between; margin-bottom:10px; }
+.tree-head .section-title{ margin-bottom:6px; }
+.tree-head .tree-lede{ margin-bottom:0; }
+
+/* The government hierarchy DIAGRAM: a pannable, zoomable node-and-connector
+   canvas, the premium "see the actual shape of it" view. One hue (blue),
+   three monotone-lightness steps by depth (region, brightest -> city,
+   deepest), validated as an ordinal ramp against both this app's light and
+   dark surfaces; leaf officials stay neutral, since there can be dozens of
+   them per city and color there would be noise, not identity. */
+.diagram-toolbar{ display:flex; gap:8px; flex-wrap:wrap; }
+.diagram-toolbar button{
+  font-family:var(--font-ui); font-size:12px; font-weight:700; color:var(--text-secondary);
+  background:var(--surface-card); border:1px solid var(--border); border-radius:7px;
+  padding:6px 11px; cursor:pointer;
+}
+.diagram-toolbar button:hover{ color:var(--text-primary); border-color:var(--accent-strong); }
+.diagram-toolbar button.view-toggle{ color:var(--text-primary); }
+.diagram-toolbar button[data-diagram-zoom-in], .diagram-toolbar button[data-diagram-zoom-out]{
+  width:30px; padding:6px 0; text-align:center; font-size:15px; line-height:1;
+}
+
+.diagram-viewport{
+  position:relative; overflow:hidden; height:min(72vh, 640px); margin-bottom:6px;
+  background:var(--surface-sunken); border:1px solid var(--border); border-radius:14px;
+  cursor:grab; touch-action:none;
+}
+.diagram-viewport:focus-visible{ outline:2px solid var(--accent-strong); outline-offset:-2px; }
+.diagram-viewport.is-dragging{ cursor:grabbing; }
+.diagram-canvas{ position:absolute; top:0; left:0; transform-origin:0 0; }
+.diagram-canvas.is-animating{ transition:transform .28s cubic-bezier(.2,.8,.2,1); }
+@media (prefers-reduced-motion: reduce){ .diagram-canvas.is-animating{ transition:none; } }
+.diagram-edges{ position:absolute; top:0; left:0; overflow:visible; pointer-events:none; }
+.diagram-edge{ fill:none; stroke-width:1.6; opacity:.55; }
+
+.diagram-node{
+  position:absolute; width:232px; box-sizing:border-box; display:flex; align-items:center; gap:8px;
+  padding:8px 12px; background:var(--surface-card); border:1px solid var(--border); border-radius:10px;
+  box-shadow:var(--shadow); cursor:pointer; user-select:none;
+}
+.diagram-node:hover{ border-color:var(--accent-strong); }
+.diagram-node:focus-visible{ outline:2px solid var(--accent-strong); outline-offset:2px; }
+.diagram-node-root{
+  background:var(--surface-raised); cursor:default; width:260px; padding:14px 16px;
+  align-items:flex-start; flex-direction:column; gap:2px;
+}
+.diagram-node-region, .diagram-node-province, .diagram-node-city{
+  border-left:3px solid var(--diagram-accent, var(--border-strong));
+}
+.diagram-node-region{ box-shadow:0 0 0 1px color-mix(in srgb, var(--diagram-accent) 25%, transparent), var(--shadow); }
+.diagram-node-official{ cursor:default; border-style:dashed; box-shadow:none; background:var(--surface-page); }
+.diagram-caret{
+  flex:0 0 auto; width:16px; height:16px; display:flex; align-items:center; justify-content:center;
+  color:var(--text-muted); transition:transform .12s ease;
+}
+.diagram-caret::before{ content:"\25B8"; font-size:12px; }
+.diagram-node.is-open > .diagram-caret{ transform:rotate(90deg); }
+.diagram-node-body{ min-width:0; flex:1 1 auto; }
+.diagram-node-title{ font-weight:700; font-size:12.5px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.diagram-node-title a{ color:var(--text-primary); text-decoration:none; }
+.diagram-node-title a:hover{ text-decoration:underline; }
+.diagram-node-meta{ font-size:11px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+.diagram-node-meta a{ color:var(--text-secondary); font-weight:600; }
+.diagram-node-meta a:hover{ color:var(--text-primary); }
+.diagram-node-empty{ color:var(--text-muted); }
+.diagram-node-count{ font-size:10px; color:var(--text-muted); margin-top:1px; }
+.diagram-node-role{ font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); flex:0 0 auto; width:56px; }
+.diagram-node-official .diagram-node-title{ font-size:12px; }
+.diagram-node-official .diagram-node-meta{ font-family:var(--font-mono); }
+.diagram-node-root .diagram-node-title{ font-size:14px; }
+@media (max-width: 640px){
+  .diagram-viewport{ height:min(60vh, 480px); }
+}
 
 /* The government hierarchy tree: an expand-on-click, indented tree view
    (root -> region -> province -> city -> Mayor/Vice Mayor/Councilors), not
@@ -496,6 +579,19 @@ a.party-node:hover{ border-color:var(--accent-strong); }
 .compare-slot-name{ font-size:15px; font-weight:700; }
 .compare-slot-meta{ font-size:12px; color:var(--text-secondary); margin-top:4px; }
 .compare-slot-clear{ font-size:11px; font-weight:600; color:var(--accent); background:none; border:none; cursor:pointer; margin-top:8px; padding:0; text-decoration:underline; }
+
+.compare-timeline-card{
+  margin-top:22px; background:var(--surface-card); border:1px solid var(--border); border-radius:14px; padding:18px 20px;
+}
+.compare-timeline-head{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.compare-legend{ display:flex; gap:16px; flex-wrap:wrap; }
+.compare-legend-item{ display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--text-secondary); }
+.compare-legend-swatch{ width:10px; height:10px; border-radius:3px; flex:0 0 auto; }
+.compare-timeline-scroll{ overflow-x:auto; }
+.compare-timeline-svg{ width:100%; min-width:520px; height:auto; display:block; }
+.compare-axis-label{ font-family:var(--font-mono); font-size:9px; fill:var(--text-muted); }
+.compare-axis-tick{ stroke:var(--border); stroke-width:1; }
+.compare-timeline-note{ font-size:11.5px; color:var(--text-muted); line-height:1.5; margin:12px 0 0; max-width:70ch; }
 
 .compare-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:22px; }
 @media (max-width:640px){ .compare-grid{ grid-template-columns:1fr; } }
