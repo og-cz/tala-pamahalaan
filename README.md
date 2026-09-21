@@ -1,11 +1,12 @@
 # Tala Pamahalaan
 
-A living record of who has held office in the Philippines, elected and appointed, linked person to
-person across every term and office they've held rather than treated as isolated election results.
+*Tala* is Filipino for record, and *pamahalaan* is government: a record of who currently holds office in the Philippines, and their full career, not just their current seat.
 
-## How to run this
+![Tala Pamahalaan's map, showing years in office by province and a locked province detail card](docs/screenshot.png)
 
-No signup, no server process to manage, just static files served locally.
+One governor here has held office 21 years running. Cebu alone has 56 cities, and one of them seats 86 councilors. That's the scale this app is built to make browsable rather than just technically knowable: a province is a click, a city is a click past that, and a whole branch of government is a tree you can page through in place instead of a spreadsheet you have to already know how to query.
+
+## Run it
 
 ```
 pip install pandas
@@ -15,151 +16,26 @@ cd app
 python3 -m http.server
 ```
 
-Then open `http://localhost:8000`. That's it, both scripts write into files the app already
-expects, nothing else to configure.
+Open `http://localhost:8000`. Everything is static files; there's no database or build step.
 
-## What this actually is
+## What's here
 
-This started as a reskin of a different project (Hugis ng Boto, an election-results map) and has
-since grown past it into a real multi-page app, but it deliberately kept that project's whole visual
-language rather than inventing a new one: the dark, near-black neutral palette, one typeface for
-everything. Color is spent in exactly three places, each carrying real information rather than
-decorating chrome: the map's choropleth scale, a single validated blue ramp on the hierarchy diagram
-(lightest for a region, deepest for a city, so depth reads as color without ever touching the
-grayscale UI around it), and a two-color pair on the Compare chart for telling the two people apart.
-Text is kept to the minimum needed to read the data; there's no hero banner and no tagline under the
-wordmark, the numbers and the page structure are meant to carry the page. It now has:
+- **Map**: a choropleth of years-in-office by province, plus two hierarchy trees behind a view switch on the same page: one by region -> province -> city -> officeholders, one by branch -> party -> officeholders. Both render as a pannable, zoomable org chart that grows downward, with a plain indented list as an alternative (and the default on phones). Either way, a branch with 90-plus parties or a city with dozens of councilors pages in place, up and down arrows, rather than dumping every card onto the canvas at once or bouncing you out to Browse.
+- **Browse**: every current official nationwide, one table, filterable by branch, position, province, party, and years in office.
+- **Compare**: put two officials side by side, total years in office, and a real term-by-term timeline chart for each.
+- **Person and city pages**: a permanent address for every official (`#/person/:id`) and every city government (`#/city/:province/:city`).
 
-- **A home page** built around one thing: a real government hierarchy, region, then province, then
-  city, then whoever currently holds each seat in it, all the way down to every sitting Councilor. It
-  opens as an actual node diagram, not a list: cards connected by drawn lines, colored by depth, that
-  you pan by dragging and zoom with the scroll wheel or the on-screen controls, so the shape of a
-  region (how many provinces, how big a city council actually is) is something you can see rather
-  than just read. Opening a branch snap-pans the view to it, since most of a country-sized tree is
-  off-screen at any moment and a click into empty space would otherwise look like nothing happened. A
-  plain indented list (the original version of this) is still one click away as "List view," and is
-  what phones open to by default, since dragging and pinching a canvas is a desktop-shaped way to work
-  a page. Either view is built from the same lazy, click-to-expand data, nothing is drawn until it's
-  opened, so the page stays fast with 19,647 officials behind it. Metro Manila's four districts sit in
-  the hierarchy exactly like any province, just with "No Governor on record" where a Governor would
-  be, since there genuinely isn't one, not because the district was left out. The national headline
-  numbers sit above it, and the background on how the data is built and matched is tucked into a
-  collapsed "About this data" section below it rather than sitting in front of the numbers.
-- **A global search bar**, in the header on every page, that finds any of the 19,647 currently
-  tracked officials by name and jumps straight to their own page, no drilling through a province and
-  then a city first.
-- **A map**, largely the same interaction as before (hover or click a province to lock it, then drill
-  into a city), now one page among several rather than the whole app. Metro Manila's four districts,
-  including the City of Manila, are hoverable and clickable like any other shape, showing a "No
-  Governor" state and their own city list instead of being skipped.
-- **A Browse page** that lists every current official nationwide at once, filterable by branch
-  (executive or legislative), position (Governor, Mayor, Vice Mayor, Councilor), province, party, and
-  a minimum years-in-office, sortable by any column. The map's sidebar only ever shows one province
-  at a time; this is the same data with the country in view all at once.
-- **A Compare page**: search for any two officials and see their total years in office, current
-  position, and full term history side by side, plus a career-timeline chart that lays every term
-  either of them has held on one shared calendar-year axis, so overlap and gaps between the two are
-  visible at a glance, not just listed. This is the honest version of a richer comparison: real
-  `term_start`/`term_end` dates, not vote totals, since this data has no vote counts or precinct-level
-  results for any race at all (see "What isn't here yet" below) and this project doesn't fabricate
-  numbers to fill that gap. See "Known rough edges" below for exactly what that means: the fields for
-  it exist in the data, `vote_share_pct` and `margin_pts`, they're just empty for every single term.
-- **A page for every person and every city**, each with its own address (`#/person/<id>`,
-  `#/city/<province>/<city>`) so a specific official or a specific city's government can be linked to
-  directly, not only reached by clicking through the map. A person's page shows their full career as
-  an actual timeline (a dot per term along a line, not a row of buttons) and, when they're on a
-  party's record, a tree of every other current officeholder under that same party, so how someone's
-  career connects to their party isn't something you'd have to already know to see.
+19,647 current officials, 88 provinces, 1,880 cities.
 
-## What's actually in the data
+## How the data is fed
 
-82 of 88 provinces have a current Governor mapped (the other 6 are Metro Manila districts and one
-chartered city, which genuinely have no Governor to show, not a data gap, and are still browsable on
-the map and by search), 1,880 cities have a
-current Mayor, and every one of the 19,647 tracked officials has a full career page: every term
-they've held, elected or appointed, not just the seat they're in now. That's the actual point of
-this project: a Mayor's page shows their time as Councilor before it and anywhere else after, so the
-pattern of how long someone has actually held power, in whatever seat, is visible in one place
-instead of scattered across separate election results.
+1. `data/raw/NLE_Winners_2004-2025.csv`, the raw source: every winning candidate, 2004-2025, one row per office per election.
+2. `scripts/build_from_openhalalan.py` reads that CSV and writes three normalized tables: `people.csv` (one row per person, matched by name + province/city, since there's no government ID to match on), `offices.csv` (one row per office), `terms.csv` (one row per person-in-office-for-a-period).
+3. `scripts/export_app_json.py` reads those three CSVs and writes the JSON files under `app/data/`: current officeholders by city/province, full term timelines by person, and a flat list of every current official. This is also where the region -> province groupings are added (hand-built, since the source file has no region column) and where a handful of known data gaps get logged rather than silently patched.
+4. `app/app.js` fetches those JSON files on load and renders everything client-side. No server, no API calls after the initial load.
 
-Opening a city shows who's currently serving alongside its Mayor: the Vice Mayor (1,869 of 1,880
-cities have one on record) and the full sitting Council, since Councilor is a genuinely multi-seat
-office, not a single winner, 15,636 current Councilor seats are recorded across every city, none
-with zero. Every name in that roster links to their own full page, so a Councilor's record is
-exactly as reachable as the Mayor's.
+Party-list seats, appointed Executive positions, and the Judiciary aren't in the source file, so they aren't in the app. Vote counts and margins also aren't in the source (it only records who won), so neither is fabricated anywhere, including on the Compare chart, which uses real term dates instead.
 
-The map still colors each province by cumulative years in office, using the same viridis color
-scale as before (kept on purpose: it's a perceptually-uniform sequential ramp, checked not
-eyeballed, and a choropleth's color scale is a data-correctness choice, not a branding one).
-Everything around it, the header, the typography, the page layout, is new.
+## Later
 
-## Known rough edges, checked and left visible rather than smoothed over
-
-92,941 people are linked from 157,333 terms. That matching is conservative on purpose: a person is
-only linked across records if they share a name and the same province or city, so someone who moved
-from a city council seat to a province-wide office will show up as two separate, unlinked entries,
-not one, because that jump needs a more reliable match than name alone and this build doesn't guess
-at it. 89 source rows had no first or last name at all; each got its own isolated identity rather
-than merging into a shared blank one, after an earlier version of this script briefly and silently
-collapsed all 89 of them into a single fictional person spanning unrelated provinces, caught before
-it ever reached the app.
-
-71 of 1,880 Mayor records have no city name on record in the source file and are filtered out of
-the city list rather than shown with a blank name. Vote share and margin aren't populated for any
-term yet, `build_from_openhalalan.py` only joins the winners file, not the separate per-candidate
-vote-count file, so there's no runner-up to compute a margin against yet. `how_ended` is blank
-everywhere: the source only records who won each cycle, not why a predecessor left, so guessing
-would be fabrication.
-
-34 Mayor offices and 27 Vice Mayor offices show more than one person tied for "current holder" at
-the exact same term_start, a real duplication already present in the source winners file (both
-seats are genuinely single-winner, so this isn't a multi-seat office like Councilor). The export
-script logs a warning listing these when it runs rather than silently picking one at random; the
-roster and the Browse page show whichever row pandas kept, which may not always be the correct name
-until the source duplication is manually resolved.
-
-The Browse page caps rendering at the top 300 matching rows for performance, since the full list is
-19,647 officials, narrow with the filters to find someone specific rather than scrolling past a
-capped table.
-
-The home page's region groupings (Ilocos Region, CALABARZON, BARMM, and so on) are a hand-built,
-static map from province to region, not something derived from the winners data, since no source
-file here carries a region column; it's ordinary, unchanging geography, so hard-coding it once is
-the honest approach rather than pretending it came from the pipeline. It surfaces two entries the
-map's boundary shapes don't have room for: a "Special Geographic Area" branch (a real Bangsamoro
-designation, not tied to any single province) and, alongside the current "Maguindanao del Norte" and
-"Maguindanao del Sur" split, an older unsplit "Maguindanao" branch that's still how 44 of its cities
-are labeled in the source file. Both are shown rather than dropped, on the same logic as everywhere
-else in this project: a gap in how the data lines up is left visible, not quietly merged away.
-
-## What isn't here yet
-
-Party-list seats aren't in this data at all, the source file only records single-winner races, and
-party-list seats come from a national vote-share formula, a different kind of result needing its
-own separate source. Provincial Board Member (the province-level equivalent of a city Councilor) is
-in the underlying data but isn't surfaced in the map's province view yet the way the city roster
-surfaces Councilors. Appointed Executive positions (Cabinet secretaries) and the Judiciary (the
-Supreme Court) also aren't in here yet, that layer was always going to be a smaller, hand-curated
-addition rather than something this ETL script could produce. Senator, President, and Vice
-President have only 48, 2, and 2 rows respectively across nine election cycles in this same source
-file, nowhere near a complete roster, so those three offices aren't surfaced in the app yet either.
-
-## Growing this into a real, live system later
-
-Everything above runs entirely on static files, on purpose, since nothing here is published and
-there's no reason to run a server for data only one person is looking at. `db/schema.sql` and
-`app/api.js` are the upgrade path for later, when updating a record needs to happen without
-rerunning both scripts and reloading the page: `schema.sql` is a Postgres schema for the same three
-tables (`people`, `offices`, `terms`), written for Supabase specifically because it turns that
-schema into a real REST API automatically, with a built-in editor for changing rows directly, no
-backend code required. `api.js` already exposes the same three functions the app needs
-(`fetchCurrentHolders`, `fetchPersonTimeline`, `fetchOfficeHistory`) against that API, so swapping
-from static JSON to a live database later is a change confined to how those functions are
-implemented, not a rewrite of `app.js`'s own routing or page logic. Picking that up means creating a
-free Supabase project, running `schema.sql` in its SQL editor, and importing the three processed
-CSVs through its Table Editor (`people.csv` first, then `offices.csv`, then `terms.csv`, since
-`terms` refers to both of the others), then filling in `app/config.js` with that project's URL and
-public anon key. The app's own hash-based routing (`#/person/123`, `#/city/abra/la-paz`) already
-produces real, shareable addresses for every page without needing any server-side routing config,
-so that part of "grow into a real system" is already done regardless of which backend eventually
-sits behind it.
+`db/schema.sql` (Postgres, meant for Supabase) and `app/api.js` are an unused upgrade path for swapping the static JSON for a live, editable database without changing `app.js`'s page logic.
