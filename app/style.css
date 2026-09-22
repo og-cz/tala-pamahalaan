@@ -503,7 +503,7 @@ a.party-node:hover{ border-color:var(--accent-strong); }
 .legend-title{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:8px; }
 .legend-bar{
   height:10px; border-radius:5px;
-  background:linear-gradient(to right, #000003, #4a0b6a, #a42c60, #ed6825, #f7d13c, #fcfea4);
+  background:linear-gradient(to right, #760505, #c53409, #ed590c, #f48930, #f5b258, #f9e9a9);
   margin-bottom:5px;
 }
 .legend-scale{ display:flex; justify-content:space-between; font-size:11px; font-weight:600; color:var(--text-secondary); }
