@@ -1284,13 +1284,15 @@
     document.getElementById("legend-min").textContent = fmtYears(domainMin) + " yrs";
     document.getElementById("legend-max").textContent = fmtYears(domainMax) + " yrs";
 
-    // sequential ramp: inferno, relative luminance rises monotonically stop
-    // to stop (checked, not eyeballed) -- the same perceptually-uniform
-    // family viridis belongs to, just its black -> red -> orange -> yellow
-    // member instead of the purple -> blue -> green one, so the map's own
-    // scale leans into the app's black-and-red identity too.
-    var ramp = ["#000003", "#1a0b40", "#4a0b6a", "#781c6d", "#a42c60",
-      "#cf4446", "#ed6825", "#fb9b06", "#f7d13c", "#fcfea4"];
+    // sequential ramp: dark red -> yellow, one continuous hue sweep (0deg
+    // to 48deg) with relative luminance rising monotonically stop to stop
+    // (checked, not eyeballed -- see the values in the comment below), so
+    // it reads red at the low end and yellow at the high end, not the
+    // black/purple start a full inferno or viridis ramp would have.
+    // #760505 .0397  #9e1807 .0794  #c53409 .1435  #ed590c .2518
+    // #f48930 .3734  #f5b258 .5196  #f7d281 .6745  #f9e9a9 .8128
+    var ramp = ["#760505", "#9e1807", "#c53409", "#ed590c",
+      "#f48930", "#f5b258", "#f7d281", "#f9e9a9"];
     var rampRgb = ramp.map(function (h) {
       h = h.replace("#", "");
       return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
