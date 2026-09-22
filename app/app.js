@@ -140,10 +140,15 @@
   var BRANCH_LABELS = { executive: "Executive branch", legislative: "Legislative branch" };
   var BRANCH_ORDER = ["executive", "legislative"];
   var NO_PARTY_KEY = "__NONE__"; // sentinel for "party is blank on this record", shared with Browse's filter
-  var PARTY_LEAF_CAP = 30; // officials shown per party node before paging
-  var PARTY_BRANCH_CAP = 15; // parties shown directly under a branch before paging (there are 91-109 distinct parties per branch)
-  var CITY_PAGE_CAP = 15; // cities shown directly under a province before paging (Cebu alone has 57)
-  var COUNCILOR_PAGE_CAP = 12; // councilors shown under a city before paging (Mayor/Vice Mayor always shown; 39 cities have more than 15 councilors on record)
+  var PARTY_LEAF_CAP = 30; // officials shown per party node before paging (list view: plain text rows, comfortable at this size)
+  var PARTY_BRANCH_CAP = 15; // parties shown directly under a branch before paging (list view; there are 91-109 distinct parties per branch)
+  var CITY_PAGE_CAP = 15; // cities shown directly under a province before paging (list view; Cebu alone has 57)
+  var COUNCILOR_PAGE_CAP = 12; // councilors shown under a city before paging (list view; Mayor/Vice Mayor always shown; 39 cities have more than 15 councilors on record)
+  // The diagram paginates the same lists, but a page of *cards* has to fit
+  // on screen at a normal, readable zoom -- unlike list rows, which just
+  // scroll. 5 cards (plus whatever's already on the row) comfortably fits a
+  // laptop-width viewport at 1x zoom with no panning or zooming required.
+  var DIAGRAM_PAGE_SIZE = 5;
 
   var governorByProvince = null; // { PROVINCE: officialRow }, built once the data is in
   function buildGovernorIndex() {
@@ -426,6 +431,19 @@
     region: "#ec6d6d", province: "#d62a2a", city: "#a71b1b",
     branch: "#ec6d6d", party: "#d62a2a",
   };
+  // What kind of thing is this card? A card several levels deep, sitting
+  // among a dozen visually similar ones, doesn't say on its own -- so every
+  // node gets a small always-visible tag (no hover needed) plus a fuller
+  // hover tooltip for anyone who wants the "what happens if I click this"
+  // explanation spelled out.
+  var DIAG_KIND_LABEL = { region: "Region", province: "Province", city: "City", branch: "Branch", party: "Party" };
+  var DIAG_KIND_HINT = {
+    region: "Region -- click to open its provinces",
+    province: "Province -- click to open its cities",
+    city: "City -- click to open its Mayor, Vice Mayor, and Councilors",
+    branch: "Branch of government -- click to open its parties",
+    party: "Political party -- click to open its officials",
+  };
 
   function govDiagramRegionNode(regionName) {
     var provinces = REGION_PROVINCES[regionName];
@@ -500,22 +518,19 @@
       expanded: false, childrenLoaded: true, children: [],
     };
   }
-  // A compact in-canvas pager (up/down arrows + "X-Y of Z"), not a link that
-  // leaves the page: there are 90-100+ parties per branch and some parties
-  // run into the hundreds of officials, so "view everything" has to mean
+  // A compact pager (up/down arrows + "X-Y of Z"), not a link that leaves
+  // the page: there are 90-100+ parties per branch and some parties run
+  // into the hundreds of officials, so "view everything" has to mean
   // paging through it right here, not a hard cap with an escape hatch.
-  // Page position is shared with the list view via a common key, so
-  // switching views mid-browse doesn't reset your place.
   var hierarchyPageState = {};
   function pageFor(key) { return hierarchyPageState[key] || 0; }
   function setPage(key, page) { hierarchyPageState[key] = Math.max(0, page); }
-  function govDiagramPagerNode(parentId, key, browseFilter, page, total, pageSize) {
-    return {
-      id: "pager:" + key, kind: "pager", parentId: parentId, pagerKey: key,
-      page: page, total: total, pageSize: pageSize,
-      expanded: false, childrenLoaded: true, children: [], browseFilter: browseFilter || {},
-    };
-  }
+  // The diagram's pager lives on the parent card itself (see pagerInfo
+  // below), not as a 16th sibling card off at the end of the row -- a
+  // pager that only shows once you've panned or zoomed past everything
+  // else isn't a pager anyone can find, let alone use fairly. Its page
+  // state uses its own "diag:" keys (a separate size than the list view's
+  // rows, so they can't share a page index meaningfully).
   function govDiagramPartyRoot() {
     return {
       id: "party-root", kind: "root", label: "Officials by branch and party",
@@ -528,51 +543,46 @@
     if (node.kind === "region") {
       node.children = REGION_PROVINCES[node.regionName].map(govDiagramProvinceNode);
     } else if (node.kind === "province") {
-      var pKeyC = "province:" + node.provinceKey;
+      var pKeyC = "diag:province:" + node.provinceKey;
       var cities = citiesForProvince(node.provinceKey);
       var pageC = pageFor(pKeyC);
-      var pageCities = cities.slice(pageC * CITY_PAGE_CAP, (pageC + 1) * CITY_PAGE_CAP);
-      var kidsC = pageCities.map(function (c) { return govDiagramCityNode(node.provinceKey, c); });
-      if (cities.length > CITY_PAGE_CAP) {
-        kidsC.push(govDiagramPagerNode(node.id, pKeyC, { province: node.provinceKey }, pageC, cities.length, CITY_PAGE_CAP));
-      }
-      node.children = kidsC;
+      var pageCities = cities.slice(pageC * DIAGRAM_PAGE_SIZE, (pageC + 1) * DIAGRAM_PAGE_SIZE);
+      node.children = pageCities.map(function (c) { return govDiagramCityNode(node.provinceKey, c); });
+      node.pagerInfo = cities.length > DIAGRAM_PAGE_SIZE
+        ? { key: pKeyC, page: pageC, total: cities.length, pageSize: DIAGRAM_PAGE_SIZE, browseFilter: { province: node.provinceKey } } : null;
     } else if (node.kind === "city") {
       var row = citiesForProvince(node.provinceKey).find(function (c) { return c.city === node.cityName; });
       var kids = [];
+      node.pagerInfo = null;
       if (row && row.full_name) {
         kids.push(govDiagramOfficialNode("Mayor", row));
         if (row.vice_mayor) kids.push(govDiagramOfficialNode("Vice Mayor", row.vice_mayor));
-        var pKeyO = "city:" + node.provinceKey + ":" + node.cityName;
+        var pKeyO = "diag:city:" + node.provinceKey + ":" + node.cityName;
         var councilors = row.councilors || [];
         var pageO = pageFor(pKeyO);
-        var pageCouncilors = councilors.slice(pageO * COUNCILOR_PAGE_CAP, (pageO + 1) * COUNCILOR_PAGE_CAP);
+        var pageCouncilors = councilors.slice(pageO * DIAGRAM_PAGE_SIZE, (pageO + 1) * DIAGRAM_PAGE_SIZE);
         pageCouncilors.forEach(function (c) { kids.push(govDiagramOfficialNode("Councilor", c)); });
-        if (councilors.length > COUNCILOR_PAGE_CAP) {
-          kids.push(govDiagramPagerNode(node.id, pKeyO, { province: node.provinceKey }, pageO, councilors.length, COUNCILOR_PAGE_CAP));
+        if (councilors.length > DIAGRAM_PAGE_SIZE) {
+          node.pagerInfo = { key: pKeyO, page: pageO, total: councilors.length, pageSize: DIAGRAM_PAGE_SIZE, browseFilter: { province: node.provinceKey } };
         }
       }
       node.children = kids;
     } else if (node.kind === "branch") {
-      var pKey1 = "branch:" + node.branchKey;
+      var pKey1 = "diag:branch:" + node.branchKey;
       var groups = partyGroupsForBranch(node.branchKey);
       var page1 = pageFor(pKey1);
-      var pageGroups = groups.slice(page1 * PARTY_BRANCH_CAP, (page1 + 1) * PARTY_BRANCH_CAP);
-      var kids3 = pageGroups.map(function (g) { return govDiagramPartyNode(node.branchKey, g.key, g.officials.length); });
-      if (groups.length > PARTY_BRANCH_CAP) {
-        kids3.push(govDiagramPagerNode(node.id, pKey1, { branch: node.branchKey }, page1, groups.length, PARTY_BRANCH_CAP));
-      }
-      node.children = kids3;
+      var pageGroups = groups.slice(page1 * DIAGRAM_PAGE_SIZE, (page1 + 1) * DIAGRAM_PAGE_SIZE);
+      node.children = pageGroups.map(function (g) { return govDiagramPartyNode(node.branchKey, g.key, g.officials.length); });
+      node.pagerInfo = groups.length > DIAGRAM_PAGE_SIZE
+        ? { key: pKey1, page: page1, total: groups.length, pageSize: DIAGRAM_PAGE_SIZE, browseFilter: { branch: node.branchKey } } : null;
     } else if (node.kind === "party") {
-      var pKey2 = "party:" + node.branchKey + ":" + node.partyKey;
+      var pKey2 = "diag:party:" + node.branchKey + ":" + node.partyKey;
       var officials = officialsForParty(node.branchKey, node.partyKey);
       var page2 = pageFor(pKey2);
-      var pageOfficials = officials.slice(page2 * PARTY_LEAF_CAP, (page2 + 1) * PARTY_LEAF_CAP);
-      var kids2 = pageOfficials.map(govDiagramPartyOfficialNode);
-      if (officials.length > PARTY_LEAF_CAP) {
-        kids2.push(govDiagramPagerNode(node.id, pKey2, { branch: node.branchKey, party: node.partyKey }, page2, officials.length, PARTY_LEAF_CAP));
-      }
-      node.children = kids2;
+      var pageOfficials = officials.slice(page2 * DIAGRAM_PAGE_SIZE, (page2 + 1) * DIAGRAM_PAGE_SIZE);
+      node.children = pageOfficials.map(govDiagramPartyOfficialNode);
+      node.pagerInfo = officials.length > DIAGRAM_PAGE_SIZE
+        ? { key: pKey2, page: page2, total: officials.length, pageSize: DIAGRAM_PAGE_SIZE, browseFilter: { branch: node.branchKey, party: node.partyKey } } : null;
     }
     node.childrenLoaded = true;
   }
@@ -626,40 +636,55 @@
     var style = "left:" + (node.x - DIAG_NODE_W / 2) + "px;top:" + node.y + "px;";
     var accent = DIAG_LEVEL_COLOR[node.kind];
     if (accent) style += "--diagram-accent:" + accent + ";";
+    var kindTag = DIAG_KIND_LABEL[node.kind]
+      ? '<div class="diagram-node-kind">' + DIAG_KIND_LABEL[node.kind] + "</div>" : "";
+    var titleAttr = DIAG_KIND_HINT[node.kind] ? ' title="' + esc(DIAG_KIND_HINT[node.kind]) + '"' : "";
     var inner;
     if (node.kind === "root" || node.kind === "region" || node.kind === "branch") {
-      inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
+      inner = kindTag + '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
         '<div class="diagram-node-meta">' + node.meta + "</div>";
     } else if (node.kind === "party") {
-      inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
+      inner = kindTag + '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
         '<div class="diagram-node-meta">' + esc(node.meta) + "</div>";
     } else if (node.kind === "province" || node.kind === "city") {
       var personBit = node.personHref
         ? (node.roleLabel ? esc(node.roleLabel) + " " : "") + '<a href="' + node.personHref + '">' + esc(node.personLabel) + "</a>" + (node.years ? " &middot; " + node.years : "")
         : '<span class="diagram-node-empty">' + esc(node.personLabel) + "</span>";
-      inner = '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
+      inner = kindTag + '<div class="diagram-node-title">' + esc(node.label) + "</div>" +
         '<div class="diagram-node-meta">' + personBit + "</div>" +
         (node.meta ? '<div class="diagram-node-count">' + esc(node.meta) + "</div>" : "");
-    } else if (node.kind === "pager") {
-      var totalPages = Math.ceil(node.total / node.pageSize);
-      var from = node.page * node.pageSize + 1, to = Math.min(node.total, (node.page + 1) * node.pageSize);
-      inner = '<div class="diagram-pager">' +
-          '<button type="button" class="diagram-pager-btn" data-pager-dir="up" data-pager-id="' + esc(node.id) + '"' + (node.page <= 0 ? " disabled" : "") + ' aria-label="Previous page">&#9650;</button>' +
-          '<div class="diagram-pager-count">' + from + "–" + to + " of " + node.total.toLocaleString() + "</div>" +
-          '<button type="button" class="diagram-pager-btn" data-pager-dir="down" data-pager-id="' + esc(node.id) + '"' + (node.page >= totalPages - 1 ? " disabled" : "") + ' aria-label="Next page">&#9660;</button>' +
-        "</div>" +
-        '<a class="diagram-pager-browse" href="#/browse" data-browse-branch="' + esc(node.browseFilter.branch || "") + '" ' +
-        'data-browse-party="' + esc(node.browseFilter.party || "") + '" data-browse-province="' + esc(node.browseFilter.province || "") + '">View all in Browse</a>';
     } else {
       inner = '<div class="diagram-node-role">' + esc(node.roleLabel) + "</div>" +
         '<div class="diagram-node-title"><a href="' + node.personHref + '">' + esc(node.label) + "</a></div>" +
         '<div class="diagram-node-meta">' + esc(node.years) + "</div>" +
         (node.location ? '<div class="diagram-node-count">' + esc(node.location) + "</div>" : "");
     }
-    return '<div class="' + cls + '" style="' + style + '" data-id="' + esc(node.id) + '"' +
+    inner += govDiagramPagerHtml(node);
+    return '<div class="' + cls + '" style="' + style + '" data-id="' + esc(node.id) + '"' + titleAttr +
       (toggleable ? ' data-toggle tabindex="0" role="button"' : "") + ">" +
       (toggleable ? '<span class="diagram-caret" aria-hidden="true"></span>' : "") +
       '<div class="diagram-node-body">' + inner + "</div></div>";
+  }
+  // The pager for a node's (possibly paginated) children renders as part of
+  // that node's OWN card, right under its title -- reachable the instant
+  // you expand it, the same for every branch/province/party/city, instead
+  // of a 16th sibling card off at the far edge of a 15-wide row that only
+  // whoever pans or zooms there ever finds.
+  function govDiagramPagerHtml(node) {
+    var p = node.pagerInfo;
+    if (!p) return "";
+    var totalPages = Math.ceil(p.total / p.pageSize);
+    var from = p.page * p.pageSize + 1, to = Math.min(p.total, (p.page + 1) * p.pageSize);
+    var f = p.browseFilter || {};
+    return '<div class="diagram-node-pager-inline">' +
+      '<div class="diagram-pager">' +
+        '<button type="button" class="diagram-pager-btn" data-pager-dir="up" data-pager-owner="' + esc(node.id) + '"' + (p.page <= 0 ? " disabled" : "") + ' aria-label="Previous page">&#9650;</button>' +
+        '<span class="diagram-pager-count">' + from + "–" + to + " of " + p.total.toLocaleString() + "</span>" +
+        '<button type="button" class="diagram-pager-btn" data-pager-dir="down" data-pager-owner="' + esc(node.id) + '"' + (p.page >= totalPages - 1 ? " disabled" : "") + ' aria-label="Next page">&#9660;</button>' +
+      "</div>" +
+      '<a class="diagram-pager-browse" href="#/browse" data-browse-branch="' + esc(f.branch || "") + '" ' +
+      'data-browse-party="' + esc(f.party || "") + '" data-browse-province="' + esc(f.province || "") + '">View all in Browse</a>' +
+    "</div>";
   }
   function renderGovDiagram(root, viewport) {
     govDiagramLayout(root);
@@ -770,11 +795,11 @@
       if (dragged) { dragged = false; e.preventDefault(); return; }
       var pagerBtn = e.target.closest(".diagram-pager-btn");
       if (pagerBtn) {
-        var pnode = govDiagramFindById(root, pagerBtn.getAttribute("data-pager-id"));
-        if (pnode) {
-          setPage(pnode.pagerKey, pageFor(pnode.pagerKey) + (pagerBtn.getAttribute("data-pager-dir") === "up" ? -1 : 1));
-          var parent = govDiagramFindById(root, pnode.parentId);
-          if (parent) { parent.childrenLoaded = false; govDiagramLoadChildren(parent); }
+        var ownerNode = govDiagramFindById(root, pagerBtn.getAttribute("data-pager-owner"));
+        if (ownerNode && ownerNode.pagerInfo) {
+          setPage(ownerNode.pagerInfo.key, ownerNode.pagerInfo.page + (pagerBtn.getAttribute("data-pager-dir") === "up" ? -1 : 1));
+          ownerNode.childrenLoaded = false;
+          govDiagramLoadChildren(ownerNode);
           rerender();
         }
         return;
@@ -1095,11 +1120,24 @@
 
   // shared by both hierarchy views on the Map page: the toolbar + diagram +
   // list markup is identical, only the ids/lede/diagram-root differ.
+  // A persistent "what am I looking at" strip -- the level order for this
+  // hierarchy, stated once up top instead of left for the viewer to piece
+  // together card by card while several levels deep in the diagram.
+  function hierarchyLevelsHtml(levels) {
+    return '<div class="hierarchy-levels">' +
+      levels.map(function (l, i) {
+        var accent = l.kind ? DIAG_LEVEL_COLOR[l.kind] : null;
+        return (i > 0 ? '<span class="hierarchy-level-sep" aria-hidden="true">&rarr;</span>' : "") +
+          '<span class="hierarchy-level-tag"' + (accent ? ' style="--diagram-accent:' + accent + '"' : "") + ">" + esc(l.label) + "</span>";
+      }).join("") +
+    "</div>";
+  }
   function hierarchyPanelHtml(opts) {
     return '<div class="tree-head">' +
         '<div>' +
           '<div class="section-title">' + esc(opts.title) + "</div>" +
           '<p class="tree-lede">' + opts.lede + "</p>" +
+          hierarchyLevelsHtml(opts.levels) +
         "</div>" +
         '<div class="diagram-toolbar" id="' + opts.prefix + '-diagram-toolbar">' +
           '<button type="button" data-diagram-zoom-out title="Zoom out" aria-label="Zoom out">&minus;</button>' +
@@ -1163,6 +1201,12 @@
             prefix: "geo", title: "Government hierarchy by region",
             lede: "Region, then province, then city. Open a branch to see who currently holds it, all the way down to every sitting Councilor.",
             treeHtml: govTreeHtml(),
+            levels: [
+              { kind: "region", label: "Region" },
+              { kind: "province", label: "Province" },
+              { kind: "city", label: "City" },
+              { kind: null, label: "Mayor / Vice Mayor / Councilor" },
+            ],
           }) +
         "</div>" +
         '<div class="map-view-panel hierarchy-panel" id="panel-party" hidden>' +
@@ -1170,6 +1214,11 @@
             prefix: "party", title: "Government hierarchy by branch and party",
             lede: "Executive, then Legislative, then every party with a current officeholder. Open one to see exactly who's in it, from Governors down to Councilors.",
             treeHtml: partyTreeHtmlRoot(),
+            levels: [
+              { kind: "branch", label: "Branch" },
+              { kind: "party", label: "Party" },
+              { kind: null, label: "Official" },
+            ],
           }) +
         "</div>" +
       "</div>";
