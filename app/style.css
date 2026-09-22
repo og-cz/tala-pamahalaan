@@ -255,7 +255,19 @@ footer.methodology b{ color:var(--text-secondary); }
 .entry-card-desc{ font-size:12.5px; color:var(--text-secondary); line-height:1.5; }
 .entry-card-go{ font-size:12px; font-weight:700; color:var(--pop-red); margin-top:4px; }
 
-.tree-lede{ font-size:12.5px; color:var(--text-secondary); line-height:1.6; max-width:64ch; margin:0 0 14px; }
+.tree-lede{ font-size:12.5px; color:var(--text-secondary); line-height:1.6; max-width:64ch; margin:0 0 10px; }
+
+/* the level-order strip under the lede: "what am I looking at" stated once,
+   up front, instead of left for the viewer to work out card by card. Each
+   tag borrows the same accent color as that level's own diagram cards, so
+   the strip and the canvas below read as one system. */
+.hierarchy-levels{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.hierarchy-level-tag{
+  font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+  color:var(--diagram-accent, var(--text-secondary)); background:var(--surface-page);
+  border:1px solid var(--border); border-radius:20px; padding:3px 10px;
+}
+.hierarchy-level-sep{ color:var(--text-muted); font-size:11px; }
 
 .tree-head{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; justify-content:space-between; margin-bottom:10px; }
 .tree-head .section-title{ margin-bottom:6px; }
@@ -311,9 +323,13 @@ footer.methodology b{ color:var(--text-secondary); }
 }
 .diagram-node-region, .diagram-node-branch{ box-shadow:0 0 0 1px color-mix(in srgb, var(--diagram-accent) 25%, transparent), var(--shadow); }
 .diagram-node-official{ cursor:default; border-style:dashed; box-shadow:none; background:var(--surface-page); }
-.diagram-node-pager{
-  cursor:default; box-shadow:none; background:var(--surface-page);
-  flex-direction:column; align-items:stretch; gap:6px; padding:10px 12px;
+/* the pager for a node's children, docked inside that node's own card
+   (see govDiagramPagerHtml) rather than as a separate sibling card, so
+   it's always right where you already are instead of off at the edge of
+   a long row. */
+.diagram-node-pager-inline{
+  margin-top:6px; padding-top:6px; border-top:1px solid var(--border);
+  display:flex; flex-direction:column; gap:4px;
 }
 .diagram-pager{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .diagram-pager-btn{
@@ -334,6 +350,12 @@ footer.methodology b{ color:var(--text-secondary); }
 .diagram-caret::before{ content:"\25BE"; font-size:12px; }
 .diagram-node.is-open > .diagram-caret{ transform:rotate(180deg); }
 .diagram-node-body{ min-width:0; flex:1 1 auto; }
+/* "what kind of thing is this card" -- region vs. province vs. city, branch
+   vs. party -- stated plainly instead of left for the viewer to infer from
+   a Gov./Mayor prefix buried in the line below. Colored with the same
+   accent as this card's own left border, so the tag and the border read as
+   one signal. */
+.diagram-node-kind{ font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--diagram-accent, var(--text-muted)); margin-bottom:1px; }
 .diagram-node-title{ font-weight:700; font-size:12.5px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .diagram-node-title a{ color:var(--text-primary); text-decoration:none; }
 .diagram-node-title a:hover{ text-decoration:underline; }
